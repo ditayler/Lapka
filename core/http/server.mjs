@@ -234,7 +234,7 @@ export function startServer({ port, host = '127.0.0.1', webDir, ctx }) {
     server.listen(port, host, () => {
       const bound = server.address().port;
       for (const h of ['127.0.0.1', 'localhost', '[::1]']) hosts.add(`${h}:${bound}`);
-      ok({ port: bound, base: `http://${host}:${bound}`, close: () => new Promise(r => server.close(r)) });
+      ok({ port: bound, base: `http://${host}:${bound}`, close: ({ force = false } = {}) => new Promise(r => { server.close(r); if (force) server.closeAllConnections(); }) });
     });
   });
 }

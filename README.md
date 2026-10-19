@@ -59,6 +59,52 @@ anidubonline.ru, gogoanime.by, jkanime.net, newdeaf.co. Other sites built the
 same way mostly open too. Sites with DRM, and sites that deliberately lock
 their players, Lapka does not break into.
 
+## macOS application
+
+Build `Lapka.app` for macOS 13.5 or newer. Unzip `Lapka-macos-arm64.zip` (Apple
+Silicon) or `Lapka-macos-x64.zip` (Intel), move the app into Applications, and
+open its icon. Node.js is included, and the player runs in its own WebKit window:
+no terminal, npm or separate browser is needed to launch it. The ZIP is currently
+a local build artifact; no release has been published.
+
+Closing the window keeps the app in the Dock; opening its icon restores the
+window. Cmd-Q, **Lapka → Quit Lapka**, and the player's Quit action stop the app
+and its server. The desktop server uses `127.0.0.1:18800`; a conflicting port
+shows an error and never terminates another process.
+
+During playback the native window buttons hide with the player controls. Hover
+near the top edge to reveal them. They remain visible on pause and while menus
+are open; macOS manages them in fullscreen.
+
+Settings and the initial library live in `~/Library/Application Support/Lapka`;
+logs are in `~/Library/Logs/Lapka/server.log`. Choose another video folder in
+Settings. Replacing or removing the app does not delete the library. Saving
+video still needs a separately installed ffmpeg; watching does not. Extended
+Document PiP is available in Chromium browsers, not in WebKit; the app supports
+system video PiP. This opts into a guarded private WebKit preference because
+Apple exposes the public configuration switch only on iOS. Support may need
+revision if that SPI changes in a future macOS. Real AirPlay receiver playback
+remains unverified.
+
+Quit any app running from the output folder before rebuilding it. Build on macOS
+with Node.js 22+ and Xcode Command Line Tools:
+
+```bash
+npm ci
+npm run build:macos
+npm run test:macos
+```
+
+Output: `dist/macos-arm64/Lapka.app` and a ZIP beside it (`macos-x64` on Intel).
+The builder downloads official Node.js 24.13.0 and verifies the archive SHA-256.
+For an offline runtime, use `npm run build:macos -- --node=/absolute/path/bin/node`;
+Node's `LICENSE` must be beside `bin/`, or pass `--node-license=/path/LICENSE`.
+`--arch=x64` targets Intel; runtime validation requires running that architecture
+on the build machine.
+
+Local builds use an ad-hoc signature. Public distribution needs a Developer ID
+and notarization; set `LAPKA_SIGN_IDENTITY` to sign with a release identity.
+
 ## Running it
 
 You need [Node.js](https://nodejs.org/) 22 or newer (tested on 24) and, only

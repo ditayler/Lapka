@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>org.mythhand.lapka</string>
+<key>CFBundleName</key><string>Lapka</string>
+<key>CFBundleDisplayName</key><string>Lapka</string>
+<key>CFBundleExecutable</key><string>Lapka</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>__VERSION__</string>
+<key>CFBundleVersion</key><string>__VERSION__</string>
+<key>CFBundleIconFile</key><string>Lapka</string>
+<key>LSMinimumSystemVersion</key><string>13.5</string>
+<key>LSMultipleInstancesProhibited</key><true/>
+<key>NSHighResolutionCapable</key><true/>
+<key>NSPrincipalClass</key><string>NSApplication</string>
+<key>NSLocalNetworkUsageDescription</key><string>Lapka shares the selected video with your AirPlay receiver on the local network.</string>
+<key>NSAppTransportSecurity</key><dict>
+<key>NSAllowsLocalNetworking</key><true/>
+<key>NSAllowsArbitraryLoadsInWebContent</key><true/>
+</dict>
+</dict></plist>

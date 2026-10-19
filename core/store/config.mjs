@@ -2,17 +2,16 @@
    Where the Lapka folder is: the one setting that cannot live inside
    the folder itself.
 
-   During development it is kept in .dev/config.json inside the
-   project, so nothing lands elsewhere on the machine. LAPKA_HOME
-   still overrides everything. Later this moves to the system's
-   place for such things, with the user's say.
+   Browser/development runs keep .dev/config.json inside the project.
+   The desktop owner sets LAPKA_DATA_DIR to its Application Support
+   folder. LAPKA_CONFIG and LAPKA_HOME still override the defaults.
    ═══════════════════════════════════════════════════════════ */
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const DEV = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '.dev');
-export const CONFIG_FILE = process.env.LAPKA_CONFIG || path.join(DEV, 'config.json');
+export const CONFIG_FILE = process.env.LAPKA_CONFIG || path.join(process.env.LAPKA_DATA_DIR || DEV, 'config.json');
 
 export async function readConfig() {
   try { return JSON.parse(await fsp.readFile(CONFIG_FILE, 'utf8')) || {}; } catch { return {}; }

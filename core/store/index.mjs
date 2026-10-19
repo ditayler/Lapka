@@ -30,10 +30,10 @@ const LIMIT_MIN_GB = 1;
 
 /* Where the Lapka folder is. Choosing it is the user's, at first
    start, and that comes with the UI; until then it is inside the
-   project, under .dev/, so nothing lands anywhere else on the
-   machine. LAPKA_HOME overrides. */
+   project, under .dev/. The desktop owner sets LAPKA_DATA_DIR to
+   its durable Application Support folder. LAPKA_HOME overrides. */
 export function defaultHome() {
-  return process.env.LAPKA_HOME || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '.dev', 'home');
+  return process.env.LAPKA_HOME || path.join(process.env.LAPKA_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '.dev'), 'home');
 }
 
 export async function openStore({ home = defaultHome(), limitGb = 24 } = {}) {
