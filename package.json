@@ -20,6 +20,7 @@
     "dev": "node scripts/dev.mjs",
     "site": "node test/site/serve.mjs",
     "build:macos": "node scripts/build-macos.mjs",
+    "build:dmg": "node scripts/build-dmg.mjs",
     "test:macos": "node scripts/test-macos.mjs",
     "check": "node scripts/check.mjs",
     "test": "node --test test/*.test.mjs"

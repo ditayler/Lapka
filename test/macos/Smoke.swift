@@ -8,6 +8,7 @@ struct NativeSmoke {
     static var checking = false
     static var phase = 0
     static var visibilityStep = 0
+    static var seededPipMode = false
     static func main() {
         if CommandLine.arguments[1] == "--generate-video" {
             do { try generateNativeVideo(at: URL(fileURLWithPath: CommandLine.arguments[2])) }
@@ -20,7 +21,7 @@ struct NativeSmoke {
         let mode = CommandLine.arguments[4]
         let app = NSApplication.shared
         app.setActivationPolicy(.regular)
-        Timer.scheduledTimer(withTimeInterval: 20, repeats: false) { _ in fail("native startup timed out") }
+        Timer.scheduledTimer(withTimeInterval: mode == "autohide" ? 25 : 20, repeats: false) { _ in fail("native startup timed out") }
         if mode == "parent-exit" {
             owner = ServerProcess(resources: resources, dataDirectory: data, logDirectory: data.appendingPathComponent("logs"), port: 0)
             do {
@@ -58,7 +59,15 @@ struct NativeSmoke {
                 checking = false
                 guard let result = value as? [String: Any] else { return }
                 if phase == 0 {
-                    if mode == "autohide" { delegate.window?.ignoresMouseEvents = true }
+                    if mode == "pip", !seededPipMode {
+                        seededPipMode = true
+                        view.evaluateJavaScript("localStorage.setItem('lapka.pipMode','document');") { _, _ in view.reload() }
+                        return
+                    }
+                    // These checks drive DOM/AppKit APIs directly. Keep desktop
+                    // mouse/keyboard input from changing playback during a run.
+                    delegate.window?.ignoresMouseEvents = true
+                    delegate.window?.makeFirstResponder(nil)
                     guard let window = delegate.window,
                           window.styleMask.contains(.fullSizeContentView),
                           window.titlebarAppearsTransparent,
@@ -76,7 +85,9 @@ struct NativeSmoke {
                     _ = delegate.applicationShouldHandleReopen(app, hasVisibleWindows: false)
                     guard delegate.window === oldWindow, delegate.window?.isVisible == true, delegate.server.pid == oldPID else { fail("reopen replaced the window/server"); return }
                     let literal = String(data: try! JSONSerialization.data(withJSONObject: [site]), encoding: .utf8)!
-                    view.evaluateJavaScript("document.querySelector('#linkInput').value=\(literal)[0];document.querySelector('#linkForm').requestSubmit();") { _, error in if let error = error { fail(error.localizedDescription) } }
+                    // Background WebKit may throttle CSS transitions. Measure
+                    // settled layouts, as the Chromium layout harness does.
+                    view.evaluateJavaScript("const still=document.createElement('style');still.textContent='*,*::before,*::after{transition:none!important;animation:none!important}';document.head.append(still);document.querySelector('#linkInput').value=\(literal)[0];document.querySelector('#linkForm').requestSubmit();") { _, error in if let error = error { fail(error.localizedDescription) } }
                     phase = 1
                     return
                 }
@@ -86,7 +97,10 @@ struct NativeSmoke {
                       result["error"] is NSNull else { fail("media failed: \(result)"); return }
                 timer.invalidate()
                 if mode == "pip" { pipChecks(view: view); return }
-                if mode == "autohide" { autohideChecks(view: view); return }
+                if mode == "autohide" {
+                    waitCondition(view: view, condition: "(() => { const v=document.querySelector('#video'); return v.readyState>=2 && !v.seeking; })()") { autohideChecks(view: view) }
+                    return
+                }
                 chromeChecks(view: view, window: delegate.window!) { finishMedia() }
             }
         }
@@ -120,27 +134,42 @@ struct NativeSmoke {
             }
             return
         }
+        let play = """
+        (() => {
+          window.__autohidePlayError=null;
+          document.querySelector('#video').play().then(() => {
+            document.querySelector('#deck').dispatchEvent(new Event('pointerleave'));
+            document.querySelector('#stage').dispatchEvent(new Event('pointermove'));
+          }).catch(e => window.__autohidePlayError=e.name+': '+e.message);
+        })();
+        """
         let steps: [Int: (String, String, Bool)] = [
-            0: ("document.querySelector('#deck').dispatchEvent(new Event('pointerleave')); document.querySelector('#video').play(); document.querySelector('#stage').dispatchEvent(new Event('pointermove'));", "document.querySelector('#stage').classList.contains('idle')", true),
+            0: (play, "document.querySelector('#stage').classList.contains('idle')", true),
             3: ("document.querySelector('#saveMenu').hidden=false;", "!document.querySelector('#saveMenu').hidden", false),
             4: ("document.querySelector('#saveMenu').hidden=true; document.querySelector('#btnGear').click();", "document.querySelector('#gearMenu').classList.contains('open')", false),
             5: ("document.querySelector('#btnGear').click(); document.querySelector('#video').pause();", "document.querySelector('#video').paused", false),
-            6: ("document.querySelector('#video').play(); document.querySelector('#stage').dispatchEvent(new Event('pointermove'));", "document.querySelector('#stage').classList.contains('idle')", true),
+            6: (play, "document.querySelector('#stage').classList.contains('idle')", true),
             8: ("document.querySelector('#video').pause();", "document.querySelector('#video').paused", false)
         ]
         let (action, condition, hidden) = steps[step]!
         view.evaluateJavaScript(action) { _, error in
             if let error = error { fail(error.localizedDescription); return }
             waitCondition(view: view, condition: condition + " /* autohide step \(step) */") {
-                // The WebKit -> AppKit state message arrives after the DOM mutation.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    assertButtons(hidden: hidden)
+                // Wait for the asynchronous WebKit -> AppKit state message.
+                waitButtons(hidden: hidden) {
                     if step == 8 {
                         delegate.shutdown { print("PASS: native controls hide on playback idle, reveal on header hover/menu/pause, and recover after fullscreen"); exit(0) }
                     } else { autohideChecks(view: view, step: step + 1) }
                 }
             }
         }
+    }
+    static func waitButtons(hidden: Bool, attempts: Int = 0, completion: @escaping () -> Void) {
+        let matches = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+            .allSatisfy { delegate.window?.standardWindowButton($0)?.isHidden == hidden }
+        if matches { completion(); return }
+        guard attempts < 40 else { assertButtons(hidden: hidden); return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { waitButtons(hidden: hidden, attempts: attempts + 1, completion: completion) }
     }
     static func assertButtons(hidden: Bool) {
         for type: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
@@ -153,7 +182,7 @@ struct NativeSmoke {
     }
     static func waitCondition(view: WKWebView, condition: String, attempts: Int = 0, completion: @escaping () -> Void) {
         guard attempts < 60 else {
-            view.evaluateJavaScript("({stage:document.querySelector('#stage').className,paused:document.querySelector('#video').paused,menus:[...document.querySelectorAll('.menu.open')].map(m=>m.id)})") { value, _ in fail("condition timed out: \(condition); state=\(String(describing:value))") }
+            view.evaluateJavaScript("({stage:document.querySelector('#stage').className,paused:document.querySelector('#video').paused,playError:window.__autohidePlayError,menus:[...document.querySelectorAll('.menu.open')].map(m=>m.id)})") { value, _ in fail("condition timed out: \(condition); state=\(String(describing:value))") }
             return
         }
         view.evaluateJavaScript(condition) { value, _ in
@@ -168,7 +197,10 @@ struct NativeSmoke {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { pipChecks(view: view, attempts: attempts + 1) }
                 return
             }
-            requestPip(view: view)
+            view.evaluateJavaScript("(() => { const b=document.querySelector('#btnPipMode'), p=document.querySelector('#btnPip'), f=document.querySelector('#btnFull'); return b.hidden && b.disabled && !b.getClientRects().length && p.getBoundingClientRect().width === f.getBoundingClientRect().width; })()") { value, _ in
+                guard value as? Bool == true else { fail("macOS still shows the split PiP mode control"); return }
+                requestPip(view: view)
+            }
         }
     }
     static func requestPip(view: WKWebView) {
@@ -186,7 +218,7 @@ struct NativeSmoke {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                 view.evaluateJavaScript("({active:document.querySelector('#stage').classList.contains('is-pip'), diagnostics:window.__pipDiagnostics})") { value, _ in
                     guard let r = value as? [String: Any], r["active"] as? Bool == true else { fail("PiP did not open: \(String(describing: value))"); return }
-                    view.evaluateJavaScript("document.querySelector('#btnPipBack').click();") { _, _ in
+                    view.evaluateJavaScript("document.querySelector('#btnPip').click();") { _, _ in
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                             view.evaluateJavaScript("({active:document.querySelector('#stage').classList.contains('is-pip'),time:document.querySelector('#video').currentTime})") { value, _ in
                                 guard let r = value as? [String: Any], r["active"] as? Bool == false,

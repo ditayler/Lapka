@@ -3256,6 +3256,16 @@ document.addEventListener('fullscreenchange', () => {
 
 /* ═══════════════ picture-in-picture ═══════════════ */
 const hasDocPip = 'documentPictureInPicture' in window;
+const macApp = !!window.webkit?.messageHandlers?.windowChrome;
+if (macApp) {
+  // The native host supports system video PiP, so it needs one action rather
+  // than a choice between browser APIs. Keep the normal round-button sizing.
+  btnPipMode.hidden = true;
+  btnPipMode.disabled = true;
+  pipMenu.hidden = true;
+  pipSeg.classList.remove('seg');
+  btnPip.classList.remove('seg__main');
+}
 
 async function nativePip() {
   if (!document.pictureInPictureEnabled || video.disablePictureInPicture) {
@@ -3273,7 +3283,7 @@ async function togglePip() {
   /* The browser mode is a window with no address bar but with the
      browser's own controls. The bar cannot be hidden in the extended
      mode: it is Chrome's own interface. */
-  if (state.pipMode === 'native') return nativePip();
+  if (macApp || state.pipMode === 'native') return nativePip();
 
   if (hasDocPip) { try { return await openDocPip(); } catch (err) { console.warn(err); } }
   return nativePip();
@@ -3492,8 +3502,8 @@ $('#btnPipBack').onclick = () => {
 /* the browser's own PiP leaves the video element in the tab, and Chrome
    paints a placeholder of its own into it; ours stands over it, as in the
    extended mode */
-video.addEventListener('enterpictureinpicture', () => { stage.classList.add('is-pip'); pipSeg.classList.add('on'); syncStatus(); pipStarted(); });
-video.addEventListener('leavepictureinpicture', () => { stage.classList.remove('is-pip'); pipSeg.classList.remove('on'); syncStatus(); pipEnded(); });
+video.addEventListener('enterpictureinpicture', () => { stage.classList.add('is-pip'); pipSeg.classList.add('on'); if (macApp) btnPip.classList.add('on'); syncStatus(); pipStarted(); });
+video.addEventListener('leavepictureinpicture', () => { stage.classList.remove('is-pip'); pipSeg.classList.remove('on'); if (macApp) btnPip.classList.remove('on'); syncStatus(); pipEnded(); });
 
 /* ── media session ───────────────────────────────────────── */
 function mediaMeta(it) {

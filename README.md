@@ -96,6 +96,15 @@ npm run test:macos
 ```
 
 Output: `dist/macos-arm64/Lapka.app` and a ZIP beside it (`macos-x64` on Intel).
+To package the existing app as a disk image, run `npm run build:dmg`.
+It creates `Lapka-1.0.0-macos-arm64.dmg` beside the app, with a link to Applications
+for drag-and-drop installation. The filename uses the app's recorded version and
+architecture; the volume label includes its version. The checkout's current
+version does not change the packaged app's label.
+For a custom app location or destination, use
+`npm run build:dmg -- --app=/path/Lapka.app --output-dir=/path/releases`.
+The app can remain running while the DMG is packaged.
+
 The builder downloads official Node.js 24.13.0 and verifies the archive SHA-256.
 For an offline runtime, use `npm run build:macos -- --node=/absolute/path/bin/node`;
 Node's `LICENSE` must be beside `bin/`, or pass `--node-license=/path/LICENSE`.
