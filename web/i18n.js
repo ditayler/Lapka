@@ -34,6 +34,8 @@ dict: {
 
 /* ─────────────────────────── English ─────────────────────────── */
 en: {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay is unavailable: {why}',
   'common.close': 'Close',
   'common.on': 'On',
   'common.off': 'Off',
@@ -453,6 +455,8 @@ en: {
 
 /* ─────────────────────────── Russian ─────────────────────────── */
 ru: {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay недоступен: {why}',
   'common.close': 'Закрыть',
   'common.on': 'Включено',
   'common.off': 'Выключено',
@@ -872,6 +876,8 @@ ru: {
 
 /* ─────────────────────────── German ──────────────────────────── */
 'de': {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay ist nicht verfügbar: {why}',
   'common.close': 'Schließen',
   'common.on': 'Ein',
   'common.off': 'Aus',
@@ -1291,6 +1297,8 @@ ru: {
 
 /* ─────────────────────────── French ──────────────────────────── */
 'fr': {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay est indisponible : {why}',
   'common.close': 'Fermer',
   'common.on': 'Activé',
   'common.off': 'Désactivé',
@@ -1710,6 +1718,8 @@ ru: {
 
 /* ─────────────────────────── Spanish ─────────────────────────── */
 'es': {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay no está disponible: {why}',
   'common.close': 'Cerrar',
   'common.on': 'Activado',
   'common.off': 'Desactivado',
@@ -2129,6 +2139,8 @@ ru: {
 
 /* ─────────────────────────── Italian ─────────────────────────── */
 'it': {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay non è disponibile: {why}',
   'common.close': 'Chiudi',
   'common.on': 'Attivo',
   'common.off': 'Disattivo',
@@ -2548,6 +2560,8 @@ ru: {
 
 /* ────────────────── Portuguese (Brazil) ───────────────────────── */
 'pt-BR': {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay está indisponível: {why}',
   'common.close': 'Fechar',
   'common.on': 'Ativado',
   'common.off': 'Desativado',
@@ -2967,6 +2981,8 @@ ru: {
 
 /* ─────────────────────────── Polish ──────────────────────────── */
 'pl': {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay jest niedostępny: {why}',
   'common.close': 'Zamknij',
   'common.on': 'Włączone',
   'common.off': 'Wyłączone',
@@ -3386,6 +3402,8 @@ ru: {
 
 /* ─────────────────────────── Turkish ─────────────────────────── */
 'tr': {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay kullanılamıyor: {why}',
   'common.close': 'Kapat',
   'common.on': 'Açık',
   'common.off': 'Kapalı',
@@ -3805,6 +3823,8 @@ ru: {
 
 /* ─────────────────── Chinese (Simplified) ─────────────────────── */
 'zh-CN': {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay 不可用：{why}',
   'common.close': '关闭',
   'common.on': '开启',
   'common.off': '关闭',

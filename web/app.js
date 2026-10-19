@@ -606,11 +606,32 @@ async function api(path, opts) {
   return d;
 }
 const post = path => api(path, { method: 'POST', headers: { 'x-lapka': '1' } });
+const airplay = new window.LapkaAirplay({
+  video, button: $('#btnAirplay'), post,
+  onNative: url => {
+    const at = video.currentTime, playing = !video.paused;
+    const token = ++playToken;
+    if (hls) { hls.destroy(); hls = null; }
+    video.addEventListener('loadedmetadata', () => {
+      if (token !== playToken) return;
+      video.currentTime = at;
+      if (playing) video.play().catch(() => {});
+    }, { once: true });
+    video.src = url;
+    video.load();
+    syncQualityButton();
+  },
+  onLocal: () => { const it = cur(); if (it) switchTrack(it); },
+  onError: e => toast(t('airplay.error', { why: e.message })),
+});
+let sourceGeneration = 0;
 
 /* stop playback completely: not only pause but also dropping the
    source, otherwise the previous episode is heard behind the overlay */
 let hls = null;
 function stopPlayback() {
+  sourceGeneration++;
+  airplay.clear();
   if (hls) { hls.destroy(); hls = null; }
   if (!video.getAttribute('src')) return;
   video.pause();
@@ -1015,6 +1036,7 @@ let playToken = 0;
    under the pointer, and scrolling would move it away from there */
 async function playItem(it, autoplay = true, glide = true) {
   if (!it) return;
+  airplay.suspend();
   state.current = it;
   state.seekPreview = null;
   if (dubsInfo && (dubsInfo.seriesId !== it.seriesId || dubsInfo.episode !== it.number)) dubsInfo = null;
@@ -1077,9 +1099,9 @@ async function playItem(it, autoplay = true, glide = true) {
    start it belongs to, and the picture is shown for whichever start
    comes last. A refused play() is not reported: it also fails on every
    interrupted start, and the play button shows the state anyway. */
-function loadSource(it, src, token, onMeta, play) {
+async function loadSource(it, src, token, onMeta, play) {
   it.loadedSrc = src.play;
-  attachSource(src);
+  if (!await attachSource(src, token) || token !== playToken) return;
   sayLoading(it);
   const reveal = fadeIn();
   video.addEventListener('loadeddata', reveal, { once: true });
@@ -1118,9 +1140,12 @@ function pickAudioTrack(stream) {
 /* An HLS stream goes through hls.js, anything else straight into the
    element. A fatal error inside hls.js is reported the way the
    element reports its own, so one handler deals with both. */
-function attachSource(stream) {
+async function attachSource(stream, token) {
+  const generation = ++sourceGeneration;
+  const remoteUrl = await airplay.prepare(stream);
+  if (generation !== sourceGeneration || token !== playToken) return false;
   if (hls) { hls.destroy(); hls = null; }
-  if (stream.kind === 'hls' && window.Hls && Hls.isSupported()) {
+  if (!remoteUrl && stream.kind === 'hls' && window.Hls && Hls.isSupported()) {
     /* fewer silent retries than the defaults: a source that does not
        answer is given up on in seconds, not in a minute, and its
        trouble is said on the stage as soon as it starts */
@@ -1135,21 +1160,23 @@ function attachSource(stream) {
     hls.on(Hls.Events.LEVEL_SWITCHED, () => { syncQualityButton(); if (audioMenu.classList.contains('open')) buildAudioMenu(); });
     hls.loadSource(stream.play);
     hls.attachMedia(video);
-    return;
+    return true;
   }
-  video.src = stream.play;
+  video.src = remoteUrl || stream.play;
   video.load();
+  return true;
 }
 
 /* changing the dub: another stream, the same position */
 async function switchTrack(it) {
+  airplay.suspend();
   /* a file still starting counts as playing: the start meant to play it */
   const at = video.currentTime, playing = !video.paused || !it.loadedSrc;
   const token = ++playToken;
   const src = await sourceFor(it);
   if (token !== playToken || it !== cur() || !src) return;
   /* the same stream, another rendition of its sound: switched inside, without a reload */
-  if (src.audio && it.loadedSrc === src.play && hls) { pickAudioTrack(src); syncAudioButton(); syncSubsButton(); applySubs(it); return; }
+  if (src.audio && it.loadedSrc === src.play && hls) { airplay.prepare(src); pickAudioTrack(src); syncAudioButton(); syncSubsButton(); applySubs(it); return; }
   loadSource(it, src, token, () => { video.currentTime = at; }, playing);
   syncAudioButton(); syncSubsButton(); applySubs(it);
   if (audioMenu.classList.contains('open')) buildAudioMenu();   // the mark on the quality follows the stream now playing
@@ -3036,7 +3063,7 @@ function removeItem(it) {
     if (nx) playItem(nx);
     else { state.current = null; playToken++; hideProgress();
            stage.classList.remove('fading');
-           video.pause(); video.removeAttribute('src'); video.load(); }
+           stopPlayback(); }
   }
   render();
 }

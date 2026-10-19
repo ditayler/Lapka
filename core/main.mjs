@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bootLapka } from './lapka.mjs';
 import { startServer } from './http/server.mjs';
+import { createAirplay } from './http/airplay.mjs';
 import { openStore } from './store/index.mjs';
 import { openState } from './store/state.mjs';
 import { openLibrary } from './store/library.mjs';
@@ -44,7 +45,7 @@ async function openHome(home, delivery) {
   return { home: store.home, store, state, library, saver };
 }
 
-export async function start({ port = PORT, home, webDir = WEB_DIR } = {}) {
+export async function start({ port = PORT, home, webDir = WEB_DIR, airplay = {} } = {}) {
   /* a folder given here (by a test, by a script) is this run's alone
      and is never written into the config; the config is for the
      folder the user chose in the settings */
@@ -55,6 +56,7 @@ export async function start({ port = PORT, home, webDir = WEB_DIR } = {}) {
   const delivery = createDelivery({ session, cache: () => ctx.store.cache });
   Object.assign(ctx, await openHome(home, delivery));
   ctx.delivery = delivery;
+  ctx.airplay = createAirplay({ ...airplay, delivery });
   ctx.lapka = await bootLapka({ session, delivery });
   /* the folder can change while running: the user picks another one */
   ctx.switchHome = async (dir, { move = false } = {}) => {
@@ -89,7 +91,7 @@ export async function start({ port = PORT, home, webDir = WEB_DIR } = {}) {
     };
     setTimeout(tick, 4000).unref();
   }
-  const close = async () => { await server.close(); await ctx.state.close(); };
+  const close = async () => { await ctx.airplay.close(); await server.close(); await ctx.state.close(); };
   /* asked from the page: the state is written down, then the process ends; the answer goes out first */
   ctx.quit = () => { setTimeout(async () => { try { await ctx.state.close(); } catch (_) {} process.exit(0); }, 150); };
   return { ctx, get lapka() { return ctx.lapka; }, get store() { return ctx.store; }, get state() { return ctx.state; }, get library() { return ctx.library; }, get delivery() { return ctx.delivery; }, get saver() { return ctx.saver; }, ...server, close };

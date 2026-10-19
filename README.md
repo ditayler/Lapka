@@ -105,6 +105,27 @@ included: [docs/INSTALL.md](docs/INSTALL.md). If you are
 installing with an AI assistant, give it the link to that file: everything it
 needs for an exact answer is there.
 
+## AirPlay (experimental)
+
+In Safari on Mac, open an episode and click AirPlay next to Picture in Picture,
+then choose an Apple TV or an AirPlay-enabled TV. Keep the computer running
+Lapka and the receiver on the same local network. Allow incoming Node.js
+connections if macOS asks. Browsers without the AirPlay API hide the button.
+
+Handoff uses Safari's native playback, preserving position and pause state.
+Multi-dub HLS playlists are pinned to the selected dub. The receiver controls
+adaptive quality; Lapka's styled subtitle overlay is not sent to the TV.
+
+Preparing a stream in Safari opens a separate port on a local network IPv4
+address. It serves only the selected media through a random token URL; app
+settings and other APIs stay on localhost. URLs are revoked on source changes
+or stops and expire after 24 hours. To select a network adapter explicitly,
+start with `LAPKA_AIRPLAY_HOST=192.168.1.10 npm start` (example address).
+
+HTTP delivery and player behavior with a simulated Safari API in Chrome are
+covered. Playback on a real AirPlay receiver, episode transitions and device
+compatibility still require verification in Safari with hardware.
+
 ## Development
 
 - `npm run dev` — Lapka on 8800 and the synthetic test site on 8801.

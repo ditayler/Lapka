@@ -42,7 +42,7 @@ export function findChrome() {
   return CHROMES.find(p => { try { return fs.statSync(p).isFile(); } catch { return false; } }) || null;
 }
 
-const CLIENT = ['index.html', 'styles.css', 'app.js', 'i18n.js'];
+const CLIENT = ['index.html', 'styles.css', 'app.js', 'i18n.js', 'airplay.js'];
 const FONTS = ['assets/fonts/FixelDisplay', 'assets/fonts/Inter'];
 
 /* Errors are collected from the head, before app.js runs: installed at
@@ -129,7 +129,7 @@ export const stalledAt = r => 'the page script stopped at: ' + r.stalled + '\n' 
 
 /* Copies the shipping files next to a page that carries the test
    script. Returns the directory. */
-export async function stage(name, script, { fonts = false, seed = null, budget = 5000 } = {}) {
+export async function stage(name, script, { fonts = false, seed = null, init = '', budget = 5000 } = {}) {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'lapka-ui-' + name + '-'));
   for (const f of CLIENT) await fsp.copyFile(path.join(WEB, f), path.join(dir, f));
   if (fonts) for (const f of FONTS)
@@ -147,7 +147,7 @@ catch (e) { /* storage refused, the test will say so */ }
   let html = await fsp.readFile(path.join(dir, 'index.html'), 'utf8');
   /* function replacements: a string one would read $$ and $& in the
      test script as patterns of its own */
-  html = html.replace('</head>', () => STILL + CATCH + primed + '\n</head>');
+  html = html.replace('</head>', () => STILL + CATCH + primed + (init ? '<script>' + init + '</script>' : '') + '\n</head>');
   /* The script is wrapped rather than trusted to report by itself: when
      it throws halfway through, an unwrapped one reports nothing at all
      and the failure reads as "the page said nothing", which points at
@@ -215,12 +215,12 @@ export async function visit(url, { width = 1280, height = 800, budget = 5000 } =
 /* The page, served by Lapka itself from the staged copy, with a folder
    of its own for the cache and the state. The test's page script gets
    `site`, the address of the synthetic site, as a literal. */
-export async function openLapka(name, script, { site = '', home = null, ...opts } = {}) {
+export async function openLapka(name, script, { site = '', home = null, airplay = {}, ...opts } = {}) {
   const { start } = await import('../core/main.mjs');
   const dir = await stage(name, `const site = ${JSON.stringify(site)};\n` + script, opts);
   const ownHome = !home;
   if (!home) home = await fsp.mkdtemp(path.join(os.tmpdir(), 'lapka-home-'));
-  const lapka = await start({ port: 0, home, webDir: dir });
+  const lapka = await start({ port: 0, home, webDir: dir, airplay });
   try {
     return await visit(lapka.base + '/' + (opts.query || ''), opts);
   } finally {
