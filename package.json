@@ -29,13 +29,13 @@
     "!web/assets/*.png",
     "!web/assets/*.svg"
   ],
-  "homepage": "https://github.com/MythHand/Lapka#readme",
+  "homepage": "https://github.com/ditayler/Lapka#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MythHand/Lapka.git"
+    "url": "git+https://github.com/ditayler/Lapka.git"
   },
   "bugs": {
-    "url": "https://github.com/MythHand/Lapka/issues"
+    "url": "https://github.com/ditayler/Lapka/issues"
   },
   "engines": {
     "node": ">=22"

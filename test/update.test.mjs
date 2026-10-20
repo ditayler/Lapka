@@ -7,6 +7,20 @@ import assert from 'node:assert/strict';
 import { compareVersions, checkUpdate, installKind, runUpdate, REPO, VERSION } from '../core/update.mjs';
 
 describe('the update', () => {
+  test('a native app waits for a published release instead of offering an unfinished tag', async () => {
+    const root = '/Applications/Lapka.app/Contents/Resources/app';
+    const asked = [];
+    const fetch = async url => {
+      asked.push(url);
+      return /releases\/latest$/.test(url)
+        ? { ok: false, status: 404 }
+        : { ok: true, json: async () => [{ name: 'v9.0.0' }] };
+    };
+    const update = await checkUpdate({ root, fetch, current: '1.3.0' });
+    assert.deepEqual(update, { current: '1.3.0', latest: null, tag: null, url: null, newer: false });
+    assert.deepEqual(asked, ['https://api.github.com/repos/ditayler/Lapka/releases/latest']);
+    await assert.rejects(checkUpdate({ root, fetch: async () => ({ ok: false, status: 500 }) }), /500/);
+  });
   test('a native bundle is replaced as an app, never rewritten as a source archive', async () => {
     const root = '/Applications/Lapka.app/Contents/Resources/app';
     assert.equal(installKind(root), 'desktop');
@@ -19,18 +33,19 @@ describe('the update', () => {
     assert.ok(compareVersions('2', '1.99.99') > 0);
   });
   test('the repository comes from the package', () => {
-    assert.equal(REPO, 'MythHand/Lapka');
+    assert.equal(REPO, 'ditayler/Lapka');
     assert.match(VERSION, /^\d+\.\d+\.\d+$/);
     assert.equal(installKind(), 'git');
   });
   test('the latest release, or the highest tag when there is no release', async () => {
     const asked = [];
-    const rel = async (url) => { asked.push(url); return { ok: true, json: async () => ({ tag_name: 'v1.2.0', html_url: 'https://github.com/MythHand/Lapka/releases/tag/v1.2.0' }) }; };
+    const rel = async (url) => { asked.push(url); return { ok: true, json: async () => ({ tag_name: 'v1.2.0', html_url: 'https://github.com/ditayler/Lapka/releases/tag/v1.2.0' }) }; };
     const a = await checkUpdate({ fetch: rel, current: '1.0.0' });
     assert.deepEqual([a.latest, a.tag, a.newer], ['1.2.0', 'v1.2.0', true]);
+    assert.deepEqual(asked, ['https://api.github.com/repos/ditayler/Lapka/releases/latest']);
     const tags = async (url) => /releases\/latest/.test(url) ? { ok: false, status: 404 } : { ok: true, json: async () => [{ name: 'v1.0.0' }, { name: 'v1.1.0' }, { name: 'rc' }, { name: 'v0.9.0' }] };
     const b = await checkUpdate({ fetch: tags, current: '1.1.0' });
-    assert.deepEqual([b.latest, b.newer, b.url], ['1.1.0', false, 'https://github.com/MythHand/Lapka/releases/tag/v1.1.0']);
+    assert.deepEqual([b.latest, b.newer, b.url], ['1.1.0', false, 'https://github.com/ditayler/Lapka/releases/tag/v1.1.0']);
     await assert.rejects(checkUpdate({ fetch: async () => ({ ok: false, status: 500 }), current: '1.0.0' }), /500/);
   });
 });

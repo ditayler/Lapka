@@ -45,13 +45,17 @@ export function compareVersions(a, b) {
   return 0;
 }
 
-/* the newest version GitHub knows: the latest release, or failing one, the highest tag */
-export async function checkUpdate({ fetch = globalThis.fetch, repo = REPO, current = VERSION } = {}) {
+/* Native apps need published downloads; source installs can also use tags. */
+export async function checkUpdate({ fetch = globalThis.fetch, repo = REPO, current = VERSION, root = ROOT } = {}) {
   const api = `https://api.github.com/repos/${repo}`;
   const headers = { accept: 'application/vnd.github+json', 'user-agent': 'Lapka' };
   let tag = null, url = null;
   const rel = await fetch(`${api}/releases/latest`, { headers, signal: AbortSignal.timeout(15000) });
   if (rel.ok) { const j = await rel.json(); tag = j.tag_name || null; url = j.html_url || null; }
+  else if (installKind(root) === 'desktop') {
+    // The version tag exists while macOS builds run, but its release is a draft.
+    if (rel.status !== 404) throw new Error(`GitHub answered ${rel.status}`);
+  }
   else {
     const tags = await fetch(`${api}/tags?per_page=50`, { headers, signal: AbortSignal.timeout(15000) });
     if (!tags.ok) throw new Error(`GitHub answered ${tags.status}`);

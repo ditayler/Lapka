@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    outputs:
+      published: ${{ steps.release.outputs.new_release_published }}
+      tag: ${{ steps.release.outputs.new_release_git_tag }}
+    steps:
+      - name: Checkout release history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check sources
+        run: npm run check
+
+      # npm prepares package.json and package-lock.json before git commits and
+      # tags them. GitHub gets a draft until the macOS downloads are ready.
+      - name: Release
+        id: release
+        uses: cycjimmy/semantic-release-action@v8
+        with:
+          semantic_version: 25
+          repository_url: https://github.com/${{ github.repository }}.git
+          extra_plugins: |
+            @semantic-release/git@10
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+
+      - name: Summary
+        env:
+          PUBLISHED: ${{ steps.release.outputs.new_release_published }}
+          RELEASE_TAG: ${{ steps.release.outputs.new_release_git_tag }}
+        run: |
+          if [ "$PUBLISHED" = true ]; then
+            echo "Prepared **$RELEASE_TAG** as a draft. macOS builds will upload DMG, ZIP and checksums, then publish it." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No releasable commits since the latest tag; version and downloads are unchanged." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # Draft releases do not trigger release: published workflows.
+  # Call the packaging workflow directly and build the newly versioned commit.
+  macos:
+    name: macOS ${{ needs.release.outputs.tag }}
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/macos-release.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}
