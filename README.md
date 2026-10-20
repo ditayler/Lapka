@@ -284,7 +284,7 @@ it is the tooling for working on Lapka's code, not needed for watching.
   The tests of real sites are kept outside the repository together with the snapshots
   of their pages.
 - The map of the core and the contracts of its blocks: [core/README.md](core/README.md).
-- Guidance for coding agents: [AGENT.MD](AGENT.MD).
+- Guidance for coding agents: [AGENTS.md](AGENTS.md).
 
 ![npm test: 124 tests pass](docs/media/tests.png)
 
