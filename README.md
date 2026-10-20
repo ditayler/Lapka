@@ -88,8 +88,8 @@ their players, Lapka does not break into.
 Build `Lapka.app` for macOS 13.5 or newer. Unzip `Lapka-macos-arm64.zip` (Apple
 Silicon) or `Lapka-macos-x64.zip` (Intel), move the app into Applications, and
 open its icon. Node.js is included, and the player runs in its own WebKit window:
-no terminal, npm or separate browser is needed to launch it. The ZIP is currently
-a local build artifact; no release has been published.
+no terminal, npm or separate browser is needed to launch it. Release builds
+publish DMG and ZIP downloads in [Releases](https://github.com/MythHand/Lapka/releases).
 
 Closing the window keeps the app in the Dock; opening its icon restores the
 window. Cmd-Q, **Lapka → Quit Lapka**, and the player's Quit action stop the app
@@ -131,14 +131,30 @@ For a custom app location or destination, use
 `npm run build:dmg -- --app=/path/Lapka.app --output-dir=/path/releases`.
 The app can remain running while the DMG is packaged.
 
+Publishing a GitHub Release runs **macOS release** for Apple Silicon and Intel.
+It checks out that release's tag and builds a fresh app, DMG and ZIP on each
+architecture. The tag (`v1.3.0` or `1.3.0`, for example) must match `package.json`.
+After both builds succeed, their DMGs, ZIPs and SHA-256 checksums are attached
+to the release. Actions artifacts are also available for 30 days. To rebuild an
+existing release, run the workflow manually with its tag. The tagged commit
+must contain the macOS build scripts and this workflow.
+
+To update on macOS, check the version in Settings, download the new DMG for your
+Mac, quit Lapka with Cmd-Q, and drag the new app into Applications, replacing
+the old one. Your library and settings stay outside the app. Installation of
+updates is currently manual.
+
 The builder downloads official Node.js 24.13.0 and verifies the archive SHA-256.
 For an offline runtime, use `npm run build:macos -- --node=/absolute/path/bin/node`;
 Node's `LICENSE` must be beside `bin/`, or pass `--node-license=/path/LICENSE`.
 `--arch=x64` targets Intel; runtime validation requires running that architecture
 on the build machine.
 
-Local builds use an ad-hoc signature. Public distribution needs a Developer ID
-and notarization; set `LAPKA_SIGN_IDENTITY` to sign with a release identity.
+Local and CI builds currently use an ad-hoc signature without notarization.
+Release downloads are labelled experimental: macOS Gatekeeper may block their
+first launch after downloading. Developer ID signing and notarization still
+need configuring for normal public distribution; `LAPKA_SIGN_IDENTITY` selects
+the builder's signing identity.
 
 ## Resources
 

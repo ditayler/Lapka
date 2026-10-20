@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
+import { createBuildProgress } from './build-progress.mjs';
 
 const exec = promisify(execFile);
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -63,11 +64,12 @@ export async function copyApplication(destination) {
   }
 }
 
-async function downloadRuntime(arch) {
+async function downloadRuntime(arch, log) {
   const cache = path.join(ROOT, '.dev', 'build-cache');
   await fsp.mkdir(cache, { recursive: true });
   const name = `node-v${NODE_VERSION}-darwin-${arch}.tar.gz`;
   const base = `https://nodejs.org/dist/v${NODE_VERSION}/`;
+  log('Fetching official Node.js SHA-256 checksums');
   const sums = await fetch(base + 'SHASUMS256.txt');
   if (!sums.ok) throw Error('Cannot download official Node checksums: ' + sums.status);
   const line = (await sums.text()).split('\n').find(l => l.trim().endsWith(' ' + name));
@@ -75,12 +77,15 @@ async function downloadRuntime(arch) {
   if (!expected || !/^[a-f0-9]{64}$/.test(expected)) throw Error('Node archive missing from official checksums');
   let bytes = await fsp.readFile(path.join(cache, name)).catch(() => null);
   if (!bytes || createHash('sha256').update(bytes).digest('hex') !== expected) {
+    log('Downloading ' + name);
     const response = await fetch(base + name);
     if (!response.ok) throw Error('Cannot download Node runtime: ' + response.status);
     bytes = Buffer.from(await response.arrayBuffer());
+    log(`Downloaded ${(bytes.length / 1024 / 1024).toFixed(1)} MiB; verifying SHA-256`);
     if (createHash('sha256').update(bytes).digest('hex') !== expected) throw Error('Node archive checksum mismatch');
     await fsp.writeFile(path.join(cache, name), bytes);
-  }
+  } else { log(`Using cached Node.js archive: ${(bytes.length / 1024 / 1024).toFixed(1)} MiB (SHA-256 verified)`); }
+  log('Extracting Node.js runtime');
   const extracted = await fsp.mkdtemp(path.join(cache, 'node-'));
   await run('/usr/bin/tar', ['-xzf', path.join(cache, name), '-C', extracted]);
   const folder = path.join(extracted, `node-v${NODE_VERSION}-darwin-${arch}`);
@@ -99,48 +104,63 @@ export async function assertOutputAvailable(output) {
 
 export async function build(options) {
   if (process.platform !== 'darwin') throw Error('Build the macOS application on macOS with Xcode Command Line Tools');
-  await assertOutputAvailable(options.output);
+  const { log, step } = createBuildProgress({ total: 9 });
   const pkg = JSON.parse(await fsp.readFile(path.join(ROOT, 'package.json'), 'utf8'));
-  const runtime = options.node ? {
+  log(`Lapka ${pkg.version} · macOS ${options.arch} · minimum macOS 13.5`);
+  log('Output: ' + options.output);
+  await step('Checking output folder', () => assertOutputAvailable(options.output));
+  const runtime = await step(options.node ? 'Preparing local Node.js runtime' : `Preparing Node.js ${NODE_VERSION} runtime`, () => options.node ? {
     file: path.resolve(options.node),
     license: path.resolve(options.nodeLicense || path.join(path.dirname(options.node), '..', 'LICENSE')),
-  } : await downloadRuntime(options.arch);
+  } : downloadRuntime(options.arch, log));
   const work = await fsp.mkdtemp(path.join(os.tmpdir(), 'lapka-app-build-'));
   try {
-    const info = await validateRuntime(runtime.file, options.arch);
+    const info = await step('Validating Node.js runtime', () => validateRuntime(runtime.file, options.arch));
+    log(`Node.js ${info.version} · ${info.arch} · standalone runtime verified`);
     const app = path.join(work, 'Lapka.app'), contents = path.join(app, 'Contents'), resources = path.join(contents, 'Resources');
-    await fsp.mkdir(path.join(contents, 'MacOS'), { recursive: true });
-    await fsp.mkdir(path.join(resources, 'runtime/bin'), { recursive: true });
-    await copyApplication(path.join(resources, 'app'));
-    await fsp.copyFile(runtime.file, path.join(resources, 'runtime/bin/node'));
-    await fsp.chmod(path.join(resources, 'runtime/bin/node'), 0o755);
-    await fsp.copyFile(runtime.license, path.join(resources, 'runtime/LICENSE'));
-    await fsp.cp(path.join(ROOT, 'desktop/macos'), path.join(resources, 'Sources/macos'), { recursive: true });
-    const plist = (await fsp.readFile(path.join(ROOT, 'desktop/macos/Info.plist'), 'utf8')).replaceAll('__VERSION__', pkg.version);
-    await fsp.writeFile(path.join(contents, 'Info.plist'), plist);
-    await fsp.writeFile(path.join(resources, 'build.json'), JSON.stringify({ app: 'Lapka', version: pkg.version, node: info.version, arch: options.arch }, null, 2));
+    await step('Copying application, dependencies and runtime', async () => {
+      await fsp.mkdir(path.join(contents, 'MacOS'), { recursive: true });
+      await fsp.mkdir(path.join(resources, 'runtime/bin'), { recursive: true });
+      await copyApplication(path.join(resources, 'app'));
+      await fsp.copyFile(runtime.file, path.join(resources, 'runtime/bin/node'));
+      await fsp.chmod(path.join(resources, 'runtime/bin/node'), 0o755);
+      await fsp.copyFile(runtime.license, path.join(resources, 'runtime/LICENSE'));
+      await fsp.cp(path.join(ROOT, 'desktop/macos'), path.join(resources, 'Sources/macos'), { recursive: true });
+      const plist = (await fsp.readFile(path.join(ROOT, 'desktop/macos/Info.plist'), 'utf8')).replaceAll('__VERSION__', pkg.version);
+      await fsp.writeFile(path.join(contents, 'Info.plist'), plist);
+      await fsp.writeFile(path.join(resources, 'build.json'), JSON.stringify({ app: 'Lapka', version: pkg.version, node: info.version, arch: options.arch }, null, 2));
+    });
     const cache = path.join(ROOT, '.dev', 'build-cache', 'swift-' + options.arch);
     await fsp.mkdir(cache, { recursive: true });
-    await run('/usr/bin/xcrun', ['swiftc', '-swift-version', '5', '-O', '-target', `${options.arch === 'x64' ? 'x86_64' : 'arm64'}-apple-macos13.5`, '-module-cache-path', cache,
-      ...['ServerProcess.swift', 'WindowChrome.swift', 'AppDelegate.swift', 'main.swift'].map(f => path.join(ROOT, 'desktop/macos', f)), '-framework', 'AppKit', '-framework', 'WebKit', '-o', path.join(contents, 'MacOS/Lapka')]);
+    await step('Compiling macOS application (Swift)', () => run('/usr/bin/xcrun', ['swiftc', '-swift-version', '5', '-O', '-target', `${options.arch === 'x64' ? 'x86_64' : 'arm64'}-apple-macos13.5`, '-module-cache-path', cache,
+      ...['ServerProcess.swift', 'WindowChrome.swift', 'AppDelegate.swift', 'main.swift'].map(f => path.join(ROOT, 'desktop/macos', f)), '-framework', 'AppKit', '-framework', 'WebKit', '-o', path.join(contents, 'MacOS/Lapka')]));
     const iconTool = path.join(work, 'icon-tool'), iconset = path.join(work, 'Lapka.iconset');
-    await run('/usr/bin/xcrun', ['swiftc', path.join(ROOT, 'desktop/macos/Icon.swift'), '-module-cache-path', cache, '-framework', 'AppKit', '-o', iconTool]);
-    await run(iconTool, [path.join(ROOT, 'web/index.html'), iconset]);
-    await run('/usr/bin/iconutil', ['-c', 'icns', iconset, '-o', path.join(resources, 'Lapka.icns')]);
+    await step('Generating application icon', async () => {
+      await run('/usr/bin/xcrun', ['swiftc', path.join(ROOT, 'desktop/macos/Icon.swift'), '-module-cache-path', cache, '-framework', 'AppKit', '-o', iconTool]);
+      await run(iconTool, [path.join(ROOT, 'web/index.html'), iconset]);
+      await run('/usr/bin/iconutil', ['-c', 'icns', iconset, '-o', path.join(resources, 'Lapka.icns')]);
+    });
     const identity = process.env.LAPKA_SIGN_IDENTITY || '-';
-    await run('/usr/bin/codesign', ['--force', '--sign', identity, ...(identity === '-' ? [] : ['--options', 'runtime', '--timestamp', '--entitlements', path.join(ROOT, 'desktop/macos/Node.entitlements')]), path.join(resources, 'runtime/bin/node')]);
-    await run('/usr/bin/codesign', ['--force', '--sign', identity, ...(identity === '-' ? [] : ['--options', 'runtime', '--timestamp']), app]);
-    await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', app]);
-    if (await fsp.stat(options.output).catch(() => null)) {
-      await assertOutputAvailable(options.output);
-      await fsp.rm(options.output, { recursive: true });
-    }
-    await fsp.mkdir(path.dirname(options.output), { recursive: true });
-    await fsp.cp(app, options.output, { recursive: true, preserveTimestamps: true });
+    log('Signing: ' + (identity === '-' ? 'ad-hoc (experimental build)' : identity));
+    await step('Signing and verifying application', async () => {
+      await run('/usr/bin/codesign', ['--force', '--sign', identity, ...(identity === '-' ? [] : ['--options', 'runtime', '--timestamp', '--entitlements', path.join(ROOT, 'desktop/macos/Node.entitlements')]), path.join(resources, 'runtime/bin/node')]);
+      await run('/usr/bin/codesign', ['--force', '--sign', identity, ...(identity === '-' ? [] : ['--options', 'runtime', '--timestamp']), app]);
+      await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', app]);
+    });
+    await step('Writing application bundle', async () => {
+      if (await fsp.stat(options.output).catch(() => null)) {
+        await assertOutputAvailable(options.output);
+        await fsp.rm(options.output, { recursive: true });
+      }
+      await fsp.mkdir(path.dirname(options.output), { recursive: true });
+      await fsp.cp(app, options.output, { recursive: true, preserveTimestamps: true });
+    });
     const zip = path.join(path.dirname(options.output), `Lapka-macos-${options.arch}.zip`);
-    await run('/usr/bin/ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', options.output, zip]);
+    await step('Creating ZIP archive', () => run('/usr/bin/ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', options.output, zip]));
+    log(`ZIP size: ${((await fsp.stat(zip)).size / 1024 / 1024).toFixed(1)} MiB`);
     return { app: options.output, zip };
   } finally {
+    log('Removing temporary build files');
     await fsp.rm(work, { recursive: true, force: true });
     if (runtime.cleanup) await fsp.rm(runtime.cleanup, { recursive: true, force: true });
   }

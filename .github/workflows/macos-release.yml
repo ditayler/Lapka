@@ -1,0 +1,127 @@
+# Build from the release tag, never from a newer main or a local bundle.
+name: macOS release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build (for example v1.3.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  build:
+    name: Build macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    env:
+      BUILD_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Check release version and runner architecture
+        id: version
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const { version } = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const tag = process.env.RELEASE_TAG;
+          if (tag !== version && tag !== 'v' + version) throw Error(`Release tag ${tag} does not match package version ${version}`);
+          if (process.platform !== 'darwin' || process.arch !== process.env.BUILD_ARCH) throw Error('Unexpected macOS runner architecture');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
+          NODE
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check packaging and desktop server
+        run: |
+          npm run check
+          node --test test/macos-build.test.mjs test/dmg-build.test.mjs test/desktop.test.mjs test/update.test.mjs
+
+      - name: Build a fresh application
+        run: npm run build:macos -- --arch="$BUILD_ARCH"
+
+      - name: Package DMG
+        run: npm run build:dmg -- --app="dist/macos-$BUILD_ARCH/Lapka.app"
+
+      - name: Record checksums
+        working-directory: dist/macos-${{ matrix.arch }}
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
+        run: shasum -a 256 ./*.dmg ./*.zip > "Lapka-$BUILD_VERSION-macos-$BUILD_ARCH.sha256"
+
+      - name: Save downloadable build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: Lapka-${{ steps.version.outputs.version }}-macos-${{ matrix.arch }}
+          path: |
+            dist/macos-${{ matrix.arch }}/*.dmg
+            dist/macos-${{ matrix.arch }}/*.zip
+            dist/macos-${{ matrix.arch }}/*.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  publish:
+    name: Attach macOS downloads to the release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: Lapka-*-macos-*
+          path: release
+          merge-multiple: true
+
+      # Only this job can write to GitHub. Both architectures must finish first.
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view "$RELEASE_TAG" --json tagName
+          for arch in arm64 x64; do
+            test -f "release/Lapka-${RELEASE_TAG#v}-macos-$arch.dmg"
+            test -f "release/Lapka-macos-$arch.zip"
+            test -f "release/Lapka-${RELEASE_TAG#v}-macos-$arch.sha256"
+          done
+          (cd release && sha256sum --check ./*.sha256)
+          # Developer ID signing/notarization is not configured yet. Make the
+          # current experimental signing status visible beside each download.
+          assets=()
+          for asset in release/*.dmg release/*.zip; do
+            assets+=("$asset#$(basename "$asset") (experimental, ad-hoc signed, not notarized)")
+          done
+          gh release upload "$RELEASE_TAG" "${assets[@]}" release/*.sha256 --clobber

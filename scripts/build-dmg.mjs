@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { createBuildProgress } from './build-progress.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const exec = promisify(execFile);
@@ -48,28 +49,40 @@ export async function planDmg({ app, outputDir }) {
 
 export async function build(options) {
   if (process.platform !== 'darwin') throw Error('Build the DMG on macOS');
-  const plan = await planDmg(options);
-  const plist = path.join(plan.app, 'Contents/Info.plist');
-  const { stdout } = await run('/usr/bin/plutil', ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', plist]);
-  if (stdout.trim() !== plan.version) throw Error('App version does not match its build metadata; rebuild with npm run build:macos');
-  await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', plan.app]);
+  const { log, step } = createBuildProgress({ total: 7 });
+  const plan = await step('Reading application metadata', () => planDmg(options));
+  log(`Lapka ${plan.version} · macOS ${plan.arch} · DMG`);
+  log('Source: ' + plan.app);
+  log('Output: ' + plan.output);
+  await step('Verifying application version and signature', async () => {
+    const plist = path.join(plan.app, 'Contents/Info.plist');
+    const { stdout } = await run('/usr/bin/plutil', ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', plist]);
+    if (stdout.trim() !== plan.version) throw Error('App version does not match its build metadata; rebuild with npm run build:macos');
+    await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', plan.app]);
+  });
   await fsp.mkdir(path.dirname(plan.output), { recursive: true });
   // Keep temporary copies hidden, and stage on the destination filesystem so
   // publishing the verified image is atomic. A failed build preserves old DMGs.
   const work = await fsp.mkdtemp(path.join(path.dirname(plan.output), '.lapka-dmg-'));
   try {
     const payload = path.join(work, 'payload'), image = path.join(work, 'Lapka.dmg');
-    await fsp.mkdir(payload);
     const copied = path.join(payload, 'Lapka.app');
-    await run('/usr/bin/ditto', [plan.app, copied]);
-    await fsp.symlink('/Applications', path.join(payload, 'Applications'));
-    await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', copied]);
-    await run('/usr/bin/hdiutil', ['create', '-volname', plan.volumeName, '-srcfolder', payload,
-      '-format', 'UDZO', '-fs', 'HFS+', '-imagekey', 'zlib-level=9', image]);
-    await run('/usr/bin/hdiutil', ['verify', image]);
-    await fsp.rename(image, plan.output);
+    await step('Preparing application and Applications shortcut', async () => {
+      await fsp.mkdir(payload);
+      await run('/usr/bin/ditto', [plan.app, copied]);
+      await fsp.symlink('/Applications', path.join(payload, 'Applications'));
+    });
+    await step('Verifying copied application signature', () => run('/usr/bin/codesign', ['--verify', '--deep', '--strict', copied]));
+    await step('Creating compressed disk image', () => run('/usr/bin/hdiutil', ['create', '-volname', plan.volumeName, '-srcfolder', payload,
+      '-format', 'UDZO', '-fs', 'HFS+', '-imagekey', 'zlib-level=9', image]));
+    await step('Verifying disk image integrity', () => run('/usr/bin/hdiutil', ['verify', image]));
+    await step('Saving DMG', () => fsp.rename(image, plan.output));
+    log(`DMG size: ${((await fsp.stat(plan.output)).size / 1024 / 1024).toFixed(1)} MiB`);
     return plan;
-  } finally { await fsp.rm(work, { recursive: true, force: true }); }
+  } finally {
+    log('Removing temporary disk image files');
+    await fsp.rm(work, { recursive: true, force: true });
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
