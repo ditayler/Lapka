@@ -2,9 +2,12 @@
 
 Русская версия: [INSTALL.ru.md](INSTALL.ru.md)
 
-For those who have never run a program from its source. Nothing hard: Lapka is
-a folder of files that Node.js runs. There is no installer for Lapka itself,
-and it writes nothing into the system.
+On macOS 13.5+, build `Lapka.app` with bundled Node.js, unzip it, move it into
+Applications, and launch its icon. See [application build and behavior](../README.md#macos-application).
+Watching in this app needs no terminal or separately installed Node.js;
+ffmpeg is only needed for saving files. A downloadable release is not published yet.
+
+The steps below cover running from source in a browser on macOS, Windows and Linux.
 
 If you are doing this with an AI assistant, show it this whole page.
 

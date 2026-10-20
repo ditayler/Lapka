@@ -7,6 +7,7 @@
 'use strict';
 
 const $ = (s, r = document) => r.querySelector(s);
+const macApp = !!window.webkit?.messageHandlers?.windowChrome;
 
 /* ═══════════════ interface language ═══════════════
    The dictionaries live in i18n.js and load through a plain script tag:
@@ -654,11 +655,32 @@ function lookLive(url, onStep) {
   });
 }
 const post = path => api(path, { method: 'POST', headers: { 'x-lapka': '1' } });
+const airplay = new window.LapkaAirplay({
+  video, button: $('#btnAirplay'), post,
+  onNative: url => {
+    const at = video.currentTime, playing = !video.paused;
+    const token = ++playToken;
+    if (hls) { hls.destroy(); hls = null; }
+    video.addEventListener('loadedmetadata', () => {
+      if (token !== playToken) return;
+      video.currentTime = at;
+      if (playing) video.play().catch(() => {});
+    }, { once: true });
+    video.src = url;
+    video.load();
+    syncQualityButton();
+  },
+  onLocal: () => { const it = cur(); if (it) switchTrack(it); },
+  onError: e => toast(t('airplay.error', { why: e.message })),
+});
+let sourceGeneration = 0;
 
 /* stop playback completely: not only pause but also dropping the
    source, otherwise the previous episode is heard behind the overlay */
 let hls = null;
 function stopPlayback() {
+  sourceGeneration++;
+  airplay.clear();
   if (loaded) markPos(loaded, video.currentTime);   // where it was left
   loaded = null;
   if (hls) { hls.destroy(); hls = null; }
@@ -1764,6 +1786,7 @@ let playToken = 0;
    under the pointer, and scrolling would move it away from there */
 async function playItem(it, autoplay = true, glide = true) {
   if (!it) return;
+  airplay.suspend();
   diary('play', `episode ${it.number}${autoplay ? '' : ' (no autoplay)'}${it.switching ? ' switching try ' + it.switching.n : ''}${it.avoid ? ' avoiding a stream' : ''}`);
   if (loaded) markPos(loaded, video.currentTime);   // where the episode before was left
   loaded = null;
@@ -1830,11 +1853,11 @@ async function playItem(it, autoplay = true, glide = true) {
    start it belongs to, and the picture is shown for whichever start
    comes last. A refused play() is not reported: it also fails on every
    interrupted start, and the play button shows the state anyway. */
-function loadSource(it, src, token, onMeta, play) {
+async function loadSource(it, src, token, onMeta, play) {
   diary('load', `${src.kind || '?'} ${src.quality || 'auto'} from ${(it.source && it.source.player) || '?'}, play ${play}`);
   it.loadedSrc = src.play;
   loaded = null;
-  attachSource(src);
+  if (!await attachSource(src, token) || token !== playToken) return;
   paintDisk(null); watchDisk();
   sayLoading(it);
   const reveal = fadeIn();
@@ -1874,9 +1897,12 @@ function pickAudioTrack(stream) {
 /* An HLS stream goes through hls.js, anything else straight into the
    element. A fatal error inside hls.js is reported the way the
    element reports its own, so one handler deals with both. */
-function attachSource(stream) {
+async function attachSource(stream, token) {
+  const generation = ++sourceGeneration;
+  const remoteUrl = await airplay.prepare(stream);
+  if (generation !== sourceGeneration || token !== playToken) return false;
   if (hls) { hls.destroy(); hls = null; }
-  if (stream.kind === 'hls' && window.Hls && Hls.isSupported()) {
+  if (!remoteUrl && stream.kind === 'hls' && window.Hls && Hls.isSupported()) {
     /* fewer silent retries than the defaults: a source that does not
        answer is given up on in seconds, not in a minute, and its
        trouble is said on the stage as soon as it starts */
@@ -1937,21 +1963,23 @@ function attachSource(stream) {
     });
     hls.loadSource(stream.play);
     hls.attachMedia(video);
-    return;
+    return true;
   }
-  video.src = stream.play;
+  video.src = remoteUrl || stream.play;
   video.load();
+  return true;
 }
 
 /* changing the dub: another stream, the same position */
 async function switchTrack(it) {
+  airplay.suspend();
   /* a file still starting counts as playing: the start meant to play it */
   const at = video.currentTime, playing = !video.paused || !it.loadedSrc;
   const token = ++playToken;
   const src = await sourceFor(it);
   if (token !== playToken || it !== cur() || !src) return;
   /* the same stream, another rendition of its sound: switched inside, without a reload */
-  if (src.audio && it.loadedSrc === src.play && hls) { pickAudioTrack(src); syncAudioButton(); syncSubsButton(); applySubs(it); return; }
+  if (src.audio && it.loadedSrc === src.play && hls) { airplay.prepare(src); pickAudioTrack(src); syncAudioButton(); syncSubsButton(); applySubs(it); return; }
   loadSource(it, src, token, () => { video.currentTime = at; }, playing);
   syncAudioButton(); syncSubsButton(); applySubs(it);
   if (audioMenu.classList.contains('open')) buildAudioMenu();   // the mark on the quality follows the stream now playing
@@ -2928,6 +2956,7 @@ function paintUpdate() {
     case 'latest': show(t('upd.latest'), t('upd.again')); break;
     case 'newer': show(t('upd.available', { v }), t('upd.to', { v })); break;
     case 'npx': show(t('upd.npx', { v }), t('upd.again')); break;
+    case 'desktop': show(t('upd.desktop', { v }), t('upd.again')); break;
     case 'updating': show(t('upd.updating', { v }), ''); for (const s of update.steps) { const d = document.createElement('div'); d.textContent = stepText(s); log.append(d); } break;
     case 'restarting': show(t('upd.waiting'), ''); break;
     case 'done': show(t('upd.done', { v }), t('upd.reload')); break;
@@ -2943,7 +2972,7 @@ async function updateClick() {
   try {
     const r = await post('/api/update/check');
     update.latest = r.latest; update.tag = r.tag; update.kind = r.kind;
-    update.phase = r.newer ? (r.kind === 'npx' ? 'npx' : 'newer') : 'latest';
+    update.phase = r.newer ? (['npx', 'desktop'].includes(r.kind) ? r.kind : 'newer') : 'latest';
   } catch (e) { update.phase = 'failed'; update.why = e.message; }
   paintUpdate();
 }
@@ -2991,14 +3020,17 @@ function buildGearMenu() {
   /* two paragraphs: what Lapka is and what the button does, then how to start it again */
   const quitNote = document.createElement('div');
   quitNote.className = 'cache__note quit__note';
-  quitNote.textContent = t('set.quitNote');
+  quitNote.textContent = t(macApp ? 'set.quitNoteMac' : 'set.quitNote', { quit: t('set.quit') });
   const quitStart = document.createElement('div');
   quitStart.className = 'cache__note quit__note';
-  quitStart.textContent = t('set.quitStart');
+  quitStart.textContent = t(macApp ? 'set.quitStartMac' : 'set.quitStart');
   const quitGuide = document.createElement('a');
   quitGuide.className = 'quit__guide';
   quitGuide.target = '_blank'; quitGuide.rel = 'noopener';
-  quitGuide.href = lang === 'ru' ? 'https://github.com/MythHand/Lapka/blob/main/docs/INSTALL.ru.md#как-выключить' : 'https://github.com/MythHand/Lapka/blob/main/docs/INSTALL.md#how-to-stop';
+  const quitDoc = macApp
+    ? (lang === 'ru' ? 'README.ru.md#приложение-для-macos' : 'README.md#macos-application')
+    : (lang === 'ru' ? 'docs/INSTALL.ru.md#как-выключить' : 'docs/INSTALL.md#how-to-stop');
+  quitGuide.href = 'https://github.com/MythHand/Lapka/blob/main/' + quitDoc;
   quitGuide.textContent = t('set.quitGuide');
   quitGuide.onclick = ev => ev.stopPropagation();
   const quit = document.createElement('button');
@@ -3239,6 +3271,7 @@ function showNotice(text, { action = null, onAction = null, onClose = null, kind
    typed by one who downloaded the folder would start another Lapka, with
    another folder of its own. Commands stand in the mono face. */
 function startAgain() {
+  if (macApp) return el('div', 'notice__how', t('set.quitStartMac'));
   const said = (key, cmd) => {
     const [a, b = ''] = t(key, { cmd: '\u0001', file: '\u0001' }).split('\u0001');
     const line = document.createDocumentFragment();
@@ -4488,7 +4521,7 @@ function removeItem(it) {
     if (nx) playItem(nx);
     else { state.current = null; playToken++; hideProgress();
            stage.classList.remove('fading');
-           video.pause(); video.removeAttribute('src'); video.load(); }
+           stopPlayback(); }
   }
   render();
 }
@@ -4681,6 +4714,15 @@ document.addEventListener('fullscreenchange', () => {
 
 /* ═══════════════ picture-in-picture ═══════════════ */
 const hasDocPip = 'documentPictureInPicture' in window;
+if (macApp) {
+  // The native host supports system video PiP, so it needs one action rather
+  // than a choice between browser APIs. Keep the normal round-button sizing.
+  btnPipMode.hidden = true;
+  btnPipMode.disabled = true;
+  pipMenu.hidden = true;
+  pipSeg.classList.remove('seg');
+  btnPip.classList.remove('seg__main');
+}
 
 async function nativePip() {
   if (!document.pictureInPictureEnabled || video.disablePictureInPicture) {
@@ -4698,7 +4740,7 @@ async function togglePip() {
   /* The browser mode is a window with no address bar but with the
      browser's own controls. The bar cannot be hidden in the extended
      mode: it is Chrome's own interface. */
-  if (state.pipMode === 'native') return nativePip();
+  if (macApp || state.pipMode === 'native') return nativePip();
 
   if (hasDocPip) { try { return await openDocPip(); } catch (err) { console.warn(err); } }
   return nativePip();
@@ -4917,8 +4959,8 @@ $('#btnPipBack').onclick = () => {
 /* the browser's own PiP leaves the video element in the tab, and Chrome
    paints a placeholder of its own into it; ours stands over it, as in the
    extended mode */
-video.addEventListener('enterpictureinpicture', () => { stage.classList.add('is-pip'); pipSeg.classList.add('on'); syncStatus(); pipStarted(); });
-video.addEventListener('leavepictureinpicture', () => { stage.classList.remove('is-pip'); pipSeg.classList.remove('on'); syncStatus(); pipEnded(); });
+video.addEventListener('enterpictureinpicture', () => { stage.classList.add('is-pip'); pipSeg.classList.add('on'); if (macApp) btnPip.classList.add('on'); syncStatus(); pipStarted(); });
+video.addEventListener('leavepictureinpicture', () => { stage.classList.remove('is-pip'); pipSeg.classList.remove('on'); if (macApp) btnPip.classList.remove('on'); syncStatus(); pipEnded(); });
 
 /* ── media session ───────────────────────────────────────── */
 function mediaMeta(it) {

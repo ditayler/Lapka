@@ -226,6 +226,9 @@
               </span>
               <!-- window mode: edge of the deck, where every player keeps it -->
               <span class="deck__grp">
+                <button class="rb hide-in-pip" id="btnAirplay" data-i18n-title="airplay.title" data-i18n-aria="airplay.title" aria-pressed="false" hidden disabled>
+                  <svg class="ph" viewBox="0 0 256 256" aria-hidden="true"><path d="M224,32H32A24,24,0,0,0,8,56V176a24,24,0,0,0,24,24H64V176H32V56H224V176H192V200H224a24,24,0,0,0,24-24V56A24,24,0,0,0,224,32ZM137,143a12,12,0,0,0-18,0l-56,64a12,12,0,0,0,9,20H184a12,12,0,0,0,9-20ZM98,203l30-34,30,34Z"/></svg>
+                </button>
                 <div class="menuwrap seg" id="pipSeg">
                   <button class="rb seg__main" id="btnPip" data-i18n-title="pip.title">
                     <svg class="ph" viewBox="4.6 4.6 246.9 246.9"><path d="M216,44H40A20,20,0,0,0,20,64V192a20,20,0,0,0,20,20H216a20,20,0,0,0,20-20V64A20,20,0,0,0,216,44ZM44,68H212v48H136a12,12,0,0,0-12,12v60H44ZM148,188V140h64v48Z"/></svg>
@@ -352,6 +355,7 @@
 
 <script src="i18n.js"></script>
 <script src="/vendor/hls.min.js"></script>
+<script src="airplay.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

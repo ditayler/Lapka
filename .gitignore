@@ -1,6 +1,7 @@
 .DS_Store
 *.log
 node_modules/
+dist/
 # real video dropped in for looking at by hand, never part of the repo
 *.mkv
 *.mp4

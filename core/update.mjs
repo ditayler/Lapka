@@ -67,6 +67,7 @@ export async function checkUpdate({ fetch = globalThis.fetch, repo = REPO, curre
    cache that npx runs from (npx). The npx cache is not a place to update:
    the next `npx` takes the newest by itself. */
 export function installKind(root = ROOT) {
+  if (/\.app[\\/]Contents[\\/]Resources[\\/]app[\\/]?$/i.test(root)) return 'desktop';
   if (fs.existsSync(path.join(root, '.git'))) return 'git';
   if (/[\\/]_npx[\\/]|[\\/]node_modules[\\/]/.test(root)) return 'npx';
   return 'zip';
@@ -83,6 +84,7 @@ export async function checkNpm({ fetch = globalThis.fetch, name = pkg.name, curr
    process running for the caller to restart. */
 export async function runUpdate({ tag, onStep = () => {}, fetch = globalThis.fetch, root = ROOT, repo = REPO } = {}) {
   const kind = installKind(root);
+  if (kind === 'desktop') throw new Error('Install the new macOS app or DMG to update Lapka');
   if (kind === 'git') {
     onStep({ key: 'updFolder' });
     const dirty = (await run('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: root })).trim();

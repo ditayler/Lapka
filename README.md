@@ -83,6 +83,79 @@ ani-media.online, domanime.ru, lordserials.fan, ailiberty.top. Other sites built
 mostly open too. Sites with DRM, and sites that deliberately lock
 their players, Lapka does not break into.
 
+## macOS application
+
+Build `Lapka.app` for macOS 13.5 or newer. Unzip `Lapka-macos-arm64.zip` (Apple
+Silicon) or `Lapka-macos-x64.zip` (Intel), move the app into Applications, and
+open its icon. Node.js is included, and the player runs in its own WebKit window:
+no terminal, npm or separate browser is needed to launch it. Release builds
+publish DMG and ZIP downloads in [Releases](https://github.com/MythHand/Lapka/releases).
+
+Closing the window keeps the app in the Dock; opening its icon restores the
+window. Cmd-Q, **Lapka → Quit Lapka**, and the player's Quit action stop the app
+and its server. The desktop server uses `127.0.0.1:18800`; a conflicting port
+shows an error and never terminates another process.
+
+During playback the native window buttons hide with the player controls. Hover
+near the top edge to reveal them. They remain visible on pause and while menus
+are open; macOS manages them in fullscreen.
+
+Settings and the initial library live in `~/Library/Application Support/Lapka`;
+logs are in `~/Library/Logs/Lapka/server.log`. Choose another video folder in
+Settings. Replacing or removing the app does not delete the library. Saving
+video still needs a separately installed ffmpeg; watching does not. Extended
+Document PiP is available in Chromium browsers, not in WebKit; the app supports
+system video PiP. This opts into a guarded private WebKit preference because
+Apple exposes the public configuration switch only on iOS. Support may need
+revision if that SPI changes in a future macOS. Real AirPlay receiver playback
+remains unverified.
+
+Quit any app running from the output folder before rebuilding it. Build on macOS
+with Node.js 22+ and Xcode Command Line Tools:
+
+```bash
+npm ci
+npm run build:macos
+npm run test:macos
+```
+
+Output: `dist/macos-arm64/Lapka.app` and a ZIP beside it (`macos-x64` on Intel).
+To package the existing app as a disk image, run `npm run build:dmg`.
+It creates `Lapka-1.3.0-macos-arm64.dmg` beside the app, with a link to Applications
+for drag-and-drop installation. The filename uses the app's recorded version and
+architecture; the volume label includes its version. The checkout's current
+version does not change the packaged app's label.
+The macOS app checks for newer versions, but updates by replacing the app or DMG;
+it never rewrites files inside the signed bundle.
+For a custom app location or destination, use
+`npm run build:dmg -- --app=/path/Lapka.app --output-dir=/path/releases`.
+The app can remain running while the DMG is packaged.
+
+Publishing a GitHub Release runs **macOS release** for Apple Silicon and Intel.
+It checks out that release's tag and builds a fresh app, DMG and ZIP on each
+architecture. The tag (`v1.3.0` or `1.3.0`, for example) must match `package.json`.
+After both builds succeed, their DMGs, ZIPs and SHA-256 checksums are attached
+to the release. Actions artifacts are also available for 30 days. To rebuild an
+existing release, run the workflow manually with its tag. The tagged commit
+must contain the macOS build scripts and this workflow.
+
+To update on macOS, check the version in Settings, download the new DMG for your
+Mac, quit Lapka with Cmd-Q, and drag the new app into Applications, replacing
+the old one. Your library and settings stay outside the app. Installation of
+updates is currently manual.
+
+The builder downloads official Node.js 24.13.0 and verifies the archive SHA-256.
+For an offline runtime, use `npm run build:macos -- --node=/absolute/path/bin/node`;
+Node's `LICENSE` must be beside `bin/`, or pass `--node-license=/path/LICENSE`.
+`--arch=x64` targets Intel; runtime validation requires running that architecture
+on the build machine.
+
+Local and CI builds currently use an ad-hoc signature without notarization.
+Release downloads are labelled experimental: macOS Gatekeeper may block their
+first launch after downloading. Developer ID signing and notarization still
+need configuring for normal public distribution; `LAPKA_SIGN_IDENTITY` selects
+the builder's signing identity.
+
 ## Resources
 
 The browser decodes the video; Lapka passes the pieces through, one or two
@@ -158,6 +231,27 @@ Step by step for macOS, Windows and Linux, ffmpeg and the usual troubles
 included: [docs/INSTALL.md](docs/INSTALL.md). If you are
 installing with an AI assistant, give it the link to that file: everything it
 needs for an exact answer is there.
+
+## AirPlay (experimental)
+
+In Safari on Mac, open an episode and click AirPlay next to Picture in Picture,
+then choose an Apple TV or an AirPlay-enabled TV. Keep the computer running
+Lapka and the receiver on the same local network. Allow incoming Node.js
+connections if macOS asks. Browsers without the AirPlay API hide the button.
+
+Handoff uses Safari's native playback, preserving position and pause state.
+Multi-dub HLS playlists are pinned to the selected dub. The receiver controls
+adaptive quality; Lapka's styled subtitle overlay is not sent to the TV.
+
+Preparing a stream in Safari opens a separate port on a local network IPv4
+address. It serves only the selected media through a random token URL; app
+settings and other APIs stay on localhost. URLs are revoked on source changes
+or stops and expire after 24 hours. To select a network adapter explicitly,
+start with `LAPKA_AIRPLAY_HOST=192.168.1.10 npm start` (example address).
+
+HTTP delivery and player behavior with a simulated Safari API in Chrome are
+covered. Playback on a real AirPlay receiver, episode transitions and device
+compatibility still require verification in Safari with hardware.
 
 ## Development
 

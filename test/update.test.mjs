@@ -4,9 +4,14 @@
    it would pull this very repository. */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { compareVersions, checkUpdate, installKind, REPO, VERSION } from '../core/update.mjs';
+import { compareVersions, checkUpdate, installKind, runUpdate, REPO, VERSION } from '../core/update.mjs';
 
 describe('the update', () => {
+  test('a native bundle is replaced as an app, never rewritten as a source archive', async () => {
+    const root = '/Applications/Lapka.app/Contents/Resources/app';
+    assert.equal(installKind(root), 'desktop');
+    await assert.rejects(runUpdate({ root, tag: 'v9.0.0', fetch: () => { throw Error('must not download'); } }), /DMG/);
+  });
   test('versions compare by numbers', () => {
     assert.ok(compareVersions('1.10.0', '1.9.3') > 0);
     assert.ok(compareVersions('v1.1.0', '1.1.0') === 0);

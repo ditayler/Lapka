@@ -34,6 +34,8 @@ dict: {
 
 /* ─────────────────────────── English ─────────────────────────── */
 en: {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay is unavailable: {why}',
   'common.close': 'Close',
   'common.on': 'On',
   'common.off': 'Off',
@@ -485,6 +487,8 @@ en: {
   'set.quit': 'Quit Lapka',
   'set.quitNote': 'Lapka runs as a small server on this machine and does not stop by itself when the tab is closed. The “Quit” button stops it.',
   'set.quitStart': 'To start again: npx -y lapka in a terminal, if installed through npx; if downloaded as an archive or through git, the start launcher or npm start in a terminal from the folder Lapka was downloaded to.',
+  'set.quitNoteMac': "Closing the window keeps Lapka running. To quit the app completely, click “{quit}” or press ⌘Q.",
+  'set.quitStartMac': "To start again, open Lapka from the Dock or the Applications folder.",
   'set.quitGuide': 'How to stop and start again: the guide on GitHub',
   'set.quitSure': 'Quit for sure?',
   'set.iface': 'Interface',
@@ -493,6 +497,7 @@ en: {
   'upd.again': 'Check again',
   'upd.available': '{v} is available',
   'upd.npx': '{v} is on npm: the next npx starts it',
+  'upd.desktop': '{v} is available: install a new macOS app or DMG',
   'upd.checking': 'Checking…',
   'upd.updating': 'Updating to {v}',
   'upd.latest': 'You have the latest version',
@@ -599,6 +604,8 @@ en: {
 
 /* ─────────────────────────── Russian ─────────────────────────── */
 ru: {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay недоступен: {why}',
   'common.close': 'Закрыть',
   'common.on': 'Включено',
   'common.off': 'Выключено',
@@ -1050,6 +1057,8 @@ ru: {
   'set.quit': 'Выключить Lapka',
   'set.quitNote': 'Lapka работает как маленький сервер на этой машине и сама не останавливается, когда закрыта вкладка. Кнопка «Выключить» останавливает её.',
   'set.quitStart': 'Запустить снова: npx -y lapka в терминале, если ставили через npx; если скачали архивом или через git — ярлыком start или командой npm start в терминале из папки, куда скачана Lapka.',
+  'set.quitNoteMac': "Закрытие окна оставляет Lapka запущенной. Чтобы полностью завершить приложение, нажмите «{quit}» или ⌘Q.",
+  'set.quitStartMac': "Чтобы запустить снова, откройте Lapka из Dock или папки «Программы».",
   'set.quitGuide': 'Как выключить и запустить снова: инструкция на GitHub',
   'set.quitSure': 'Точно выключить?',
   'set.iface': 'Интерфейс',
@@ -1058,6 +1067,7 @@ ru: {
   'upd.again': 'Проверить ещё раз',
   'upd.available': 'Доступна {v}',
   'upd.npx': '{v} уже в npm: следующий запуск через npx возьмёт её',
+  'upd.desktop': 'Доступна {v}: установите новую macOS-сборку или DMG',
   'upd.checking': 'Проверяю…',
   'upd.updating': 'Обновляю до {v}',
   'upd.latest': 'У вас последняя версия',
@@ -1164,6 +1174,8 @@ ru: {
 
 /* ─────────────────────────── German ──────────────────────────── */
 'de': {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay ist nicht verfügbar: {why}',
   'common.close': 'Schließen',
   'common.on': 'Ein',
   'common.off': 'Aus',
@@ -1615,6 +1627,8 @@ ru: {
   'set.quit': 'Lapka beenden',
   'set.quitNote': 'Lapka läuft als kleiner Server auf diesem Rechner und hält nicht von selbst an, wenn der Tab geschlossen wird. Der Knopf „Beenden“ hält sie an.',
   'set.quitStart': 'Neu starten: npx -y lapka im Terminal, wenn über npx installiert; bei Download als Archiv oder über git mit dem Starter start oder npm start im Terminal aus dem Ordner, in den Lapka geladen wurde.',
+  'set.quitNoteMac': "Beim Schließen des Fensters läuft Lapka weiter. Um die App vollständig zu beenden, klicke auf „{quit}“ oder drücke ⌘Q.",
+  'set.quitStartMac': "Zum erneuten Starten öffne Lapka im Dock oder im Ordner „Programme“.",
   'set.quitGuide': 'Anhalten und neu starten: die Anleitung auf GitHub',
   'set.quitSure': 'Wirklich beenden?',
   'set.iface': 'Oberfläche',
@@ -1623,6 +1637,7 @@ ru: {
   'upd.again': 'Noch einmal prüfen',
   'upd.available': '{v} ist verfügbar',
   'upd.npx': '{v} ist auf npm: der nächste npx-Start nimmt sie',
+  'upd.desktop': '{v} ist verfügbar: neue macOS-App oder DMG installieren',
   'upd.checking': 'Prüfe…',
   'upd.updating': 'Aktualisiere auf {v}',
   'upd.latest': 'Du hast die neueste Version',
@@ -1729,6 +1744,8 @@ ru: {
 
 /* ─────────────────────────── French ──────────────────────────── */
 'fr': {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay est indisponible : {why}',
   'common.close': 'Fermer',
   'common.on': 'Activé',
   'common.off': 'Désactivé',
@@ -2180,6 +2197,8 @@ ru: {
   'set.quit': 'Quitter Lapka',
   'set.quitNote': 'Lapka tourne comme un petit serveur sur cette machine et ne s’arrête pas d’elle-même quand l’onglet est fermé. Le bouton « Quitter » l’arrête.',
   'set.quitStart': 'Pour relancer : npx -y lapka dans un terminal si elle est installée avec npx ; téléchargée en archive ou avec git, le lanceur start ou npm start dans un terminal depuis le dossier où Lapka a été téléchargée.',
+  'set.quitNoteMac': "Fermer la fenêtre laisse Lapka en cours d’exécution. Pour quitter complètement l’application, cliquez sur « {quit} » ou appuyez sur ⌘Q.",
+  'set.quitStartMac': "Pour relancer Lapka, ouvrez-la depuis le Dock ou le dossier Applications.",
   'set.quitGuide': 'Arrêter et relancer : le guide sur GitHub',
   'set.quitSure': 'Vraiment quitter ?',
   'set.iface': 'Interface',
@@ -2188,6 +2207,7 @@ ru: {
   'upd.again': 'Vérifier à nouveau',
   'upd.available': '{v} est disponible',
   'upd.npx': '{v} est sur npm : le prochain npx la lancera',
+  'upd.desktop': '{v} est disponible : installez la nouvelle app macOS ou le DMG',
   'upd.checking': 'Vérification…',
   'upd.updating': 'Mise à jour vers {v}',
   'upd.latest': 'Vous avez la dernière version',
@@ -2294,6 +2314,8 @@ ru: {
 
 /* ─────────────────────────── Spanish ─────────────────────────── */
 'es': {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay no está disponible: {why}',
   'common.close': 'Cerrar',
   'common.on': 'Activado',
   'common.off': 'Desactivado',
@@ -2745,6 +2767,8 @@ ru: {
   'set.quit': 'Cerrar Lapka',
   'set.quitNote': 'Lapka funciona como un pequeño servidor en este equipo y no se detiene sola al cerrar la pestaña. El botón «Cerrar» la detiene.',
   'set.quitStart': 'Para volver a iniciarla: npx -y lapka en una terminal si la instalaste con npx; si la descargaste como archivo o con git, el lanzador start o npm start en una terminal desde la carpeta donde descargaste Lapka.',
+  'set.quitNoteMac': "Cerrar la ventana mantiene Lapka en ejecución. Para salir de la aplicación por completo, pulsa «{quit}» o ⌘Q.",
+  'set.quitStartMac': "Para iniciarla de nuevo, abre Lapka desde el Dock o la carpeta Aplicaciones.",
   'set.quitGuide': 'Cómo detener y volver a iniciar: la guía en GitHub',
   'set.quitSure': '¿Cerrar de verdad?',
   'set.iface': 'Interfaz',
@@ -2753,6 +2777,7 @@ ru: {
   'upd.again': 'Comprobar de nuevo',
   'upd.available': '{v} está disponible',
   'upd.npx': '{v} está en npm: el próximo npx la abrirá',
+  'upd.desktop': '{v} está disponible: instala la nueva app de macOS o el DMG',
   'upd.checking': 'Comprobando…',
   'upd.updating': 'Actualizando a {v}',
   'upd.latest': 'Tienes la última versión',
@@ -2859,6 +2884,8 @@ ru: {
 
 /* ─────────────────────────── Italian ─────────────────────────── */
 'it': {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay non è disponibile: {why}',
   'common.close': 'Chiudi',
   'common.on': 'Attivo',
   'common.off': 'Disattivo',
@@ -3310,6 +3337,8 @@ ru: {
   'set.quit': 'Chiudi Lapka',
   'set.quitNote': 'Lapka gira come un piccolo server su questo computer e non si ferma da sola quando la scheda viene chiusa. Il pulsante «Chiudi» la ferma.',
   'set.quitStart': 'Per riavviarla: npx -y lapka in un terminale se installata con npx; se scaricata come archivio o con git, il lanciatore start oppure npm start in un terminale dalla cartella dove è stata scaricata Lapka.',
+  'set.quitNoteMac': "Chiudere la finestra lascia Lapka in esecuzione. Per uscire completamente dall’app, fai clic su «{quit}» o premi ⌘Q.",
+  'set.quitStartMac': "Per riavviare Lapka, aprila dal Dock o dalla cartella Applicazioni.",
   'set.quitGuide': 'Come fermare e riavviare: la guida su GitHub',
   'set.quitSure': 'Chiudere davvero?',
   'set.iface': 'Interfaccia',
@@ -3318,6 +3347,7 @@ ru: {
   'upd.again': 'Controlla di nuovo',
   'upd.available': 'È disponibile {v}',
   'upd.npx': '{v} è su npm: il prossimo npx la avvierà',
+  'upd.desktop': 'È disponibile {v}: installa la nuova app macOS o il DMG',
   'upd.checking': 'Controllo…',
   'upd.updating': 'Aggiorno a {v}',
   'upd.latest': 'Hai l’ultima versione',
@@ -3424,6 +3454,8 @@ ru: {
 
 /* ────────────────── Portuguese (Brazil) ───────────────────────── */
 'pt-BR': {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay está indisponível: {why}',
   'common.close': 'Fechar',
   'common.on': 'Ativado',
   'common.off': 'Desativado',
@@ -3875,6 +3907,8 @@ ru: {
   'set.quit': 'Encerrar a Lapka',
   'set.quitNote': 'A Lapka roda como um pequeno servidor nesta máquina e não para sozinha quando a aba é fechada. O botão “Encerrar” a desliga.',
   'set.quitStart': 'Para iniciar de novo: npx -y lapka no terminal, se instalou pelo npx; se baixou como arquivo ou pelo git, o atalho start ou npm start no terminal a partir da pasta onde o Lapka foi baixado.',
+  'set.quitNoteMac': "Fechar a janela mantém o Lapka em execução. Para encerrar o aplicativo completamente, clique em “{quit}” ou pressione ⌘Q.",
+  'set.quitStartMac': "Para iniciar novamente, abra o Lapka pelo Dock ou pela pasta Aplicativos.",
   'set.quitGuide': 'Como encerrar e iniciar de novo: o guia no GitHub',
   'set.quitSure': 'Encerrar mesmo?',
   'set.iface': 'Interface',
@@ -3883,6 +3917,7 @@ ru: {
   'upd.again': 'Verificar de novo',
   'upd.available': '{v} está disponível',
   'upd.npx': '{v} está no npm: o próximo npx vai abri-la',
+  'upd.desktop': '{v} está disponível: instale a nova app macOS ou o DMG',
   'upd.checking': 'Verificando…',
   'upd.updating': 'Atualizando para {v}',
   'upd.latest': 'Você tem a versão mais recente',
@@ -3989,6 +4024,8 @@ ru: {
 
 /* ─────────────────────────── Polish ──────────────────────────── */
 'pl': {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay jest niedostępny: {why}',
   'common.close': 'Zamknij',
   'common.on': 'Włączone',
   'common.off': 'Wyłączone',
@@ -4440,6 +4477,8 @@ ru: {
   'set.quit': 'Wyłącz Lapkę',
   'set.quitNote': 'Lapka działa jako mały serwer na tym komputerze i nie zatrzymuje się sama po zamknięciu karty. Przycisk „Wyłącz” ją zatrzymuje.',
   'set.quitStart': 'Aby uruchomić ponownie: npx -y lapka w terminalu, jeśli instalowana przez npx; jeśli pobrana jako archiwum lub przez git, skrót start albo npm start w terminalu z folderu, do którego pobrano Lapka.',
+  'set.quitNoteMac': "Zamknięcie okna pozostawia Lapka uruchomioną. Aby całkowicie zamknąć aplikację, kliknij „{quit}” lub naciśnij ⌘Q.",
+  'set.quitStartMac': "Aby uruchomić ponownie, otwórz Lapka z Docka lub folderu Aplikacje.",
   'set.quitGuide': 'Jak zatrzymać i uruchomić ponownie: instrukcja na GitHubie',
   'set.quitSure': 'Na pewno wyłączyć?',
   'set.iface': 'Interfejs',
@@ -4448,6 +4487,7 @@ ru: {
   'upd.again': 'Sprawdź jeszcze raz',
   'upd.available': 'Dostępna {v}',
   'upd.npx': '{v} jest w npm: następne npx ją uruchomi',
+  'upd.desktop': 'Dostępna jest {v}: zainstaluj nową aplikację macOS lub DMG',
   'upd.checking': 'Sprawdzam…',
   'upd.updating': 'Aktualizuję do {v}',
   'upd.latest': 'Masz najnowszą wersję',
@@ -4554,6 +4594,8 @@ ru: {
 
 /* ─────────────────────────── Turkish ─────────────────────────── */
 'tr': {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay kullanılamıyor: {why}',
   'common.close': 'Kapat',
   'common.on': 'Açık',
   'common.off': 'Kapalı',
@@ -5005,6 +5047,8 @@ ru: {
   'set.quit': 'Lapka’yı kapat',
   'set.quitNote': 'Lapka bu bilgisayarda küçük bir sunucu olarak çalışır ve sekme kapanınca kendiliğinden durmaz. “Kapat” düğmesi onu durdurur.',
   'set.quitStart': 'Yeniden başlatmak için: npx ile kurduysanız terminalde npx -y lapka; arşiv olarak veya git ile indirdiyseniz Lapka’nın indirildiği klasörde start başlatıcısı ya da terminalde npm start.',
+  'set.quitNoteMac': "Pencereyi kapatmak Lapka’yı durdurmaz. Uygulamadan tamamen çıkmak için “{quit}” düğmesine tıklayın veya ⌘Q tuşlarına basın.",
+  'set.quitStartMac': "Yeniden başlatmak için Lapka’yı Dock’tan veya Uygulamalar klasöründen açın.",
   'set.quitGuide': 'Durdurma ve yeniden başlatma: GitHub’daki kılavuz',
   'set.quitSure': 'Gerçekten kapatılsın mı?',
   'set.iface': 'Arayüz',
@@ -5013,6 +5057,7 @@ ru: {
   'upd.again': 'Yeniden kontrol et',
   'upd.available': '{v} sürümü var',
   'upd.npx': '{v} npm’de: bir sonraki npx onu başlatır',
+  'upd.desktop': '{v} hazır: yeni macOS uygulamasını veya DMG dosyasını yükleyin',
   'upd.checking': 'Kontrol ediliyor…',
   'upd.updating': '{v} sürümüne güncelleniyor',
   'upd.latest': 'En son sürüm sizde',
@@ -5119,6 +5164,8 @@ ru: {
 
 /* ─────────────────── Chinese (Simplified) ─────────────────────── */
 'zh-CN': {
+  'airplay.title': 'AirPlay',
+  'airplay.error': 'AirPlay 不可用：{why}',
   'common.close': '关闭',
   'common.on': '开启',
   'common.off': '关闭',
@@ -5570,6 +5617,8 @@ ru: {
   'set.quit': '退出 Lapka',
   'set.quitNote': 'Lapka 以一个小型服务器的形式在本机运行，关闭标签页后不会自行停止。“退出”按钮会停止它。',
   'set.quitStart': '重新启动：如果通过 npx 安装，在终端运行 npx -y lapka；如果以压缩包或 git 下载，在 Lapka 所在文件夹中使用 start 启动器，或在终端运行 npm start。',
+  'set.quitNoteMac': "关闭窗口后 Lapka 仍会继续运行。要完全退出应用，请点击“{quit}”或按 ⌘Q。",
+  'set.quitStartMac': "要重新启动，请从程序坞或“应用程序”文件夹打开 Lapka。",
   'set.quitGuide': '如何停止与重新启动：GitHub 上的指南',
   'set.quitSure': '确定退出？',
   'set.iface': '界面',
@@ -5578,6 +5627,7 @@ ru: {
   'upd.again': '再次检查',
   'upd.available': '可更新到 {v}',
   'upd.npx': '{v} 已在 npm：下次 npx 会启动它',
+  'upd.desktop': '{v} 已发布：请安装新版 macOS 应用或 DMG',
   'upd.checking': '检查中…',
   'upd.updating': '正在更新到 {v}',
   'upd.latest': '已是最新版本',

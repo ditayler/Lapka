@@ -35,9 +35,11 @@ const LIMIT_MIN_GB = 1;
    the npm cache (npx, a global install) has no folder of its own to keep
    things in: the cache is replaced by the next version, so the folder is
    Lapka in the user's home folder, named as a Lapka folder is.
+   The desktop owner uses LAPKA_DATA_DIR for its durable initial library.
    LAPKA_HOME overrides. */
 export function defaultHome({ kind = installKind(), homeDir = os.homedir() } = {}) {
   if (process.env.LAPKA_HOME) return process.env.LAPKA_HOME;
+  if (process.env.LAPKA_DATA_DIR) return path.join(process.env.LAPKA_DATA_DIR, 'home');
   if (kind === 'npx') return path.join(homeDir, 'Lapka');
   return path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '.dev', 'home');
 }

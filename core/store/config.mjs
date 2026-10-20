@@ -11,7 +11,8 @@
    Until 1.1.0 it was .dev/config.json inside the project: found there
    and not yet in the system's place, it is carried over once.
    LAPKA_CONFIG names the file outright (tests, a second Lapka);
-   LAPKA_HOME overrides the folder itself.
+   LAPKA_HOME overrides the folder itself. The desktop owner may set
+   LAPKA_DATA_DIR to use a separate durable settings directory.
    ═══════════════════════════════════════════════════════════ */
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -26,7 +27,7 @@ export function systemConfigDir() {
   if (process.platform === 'win32') return path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Lapka');
   return path.join(process.env.XDG_CONFIG_HOME || path.join(home, '.config'), 'lapka');
 }
-export const CONFIG_FILE = process.env.LAPKA_CONFIG || path.join(systemConfigDir(), 'config.json');
+export const CONFIG_FILE = process.env.LAPKA_CONFIG || path.join(process.env.LAPKA_DATA_DIR || systemConfigDir(), 'config.json');
 
 const readJson = async file => { try { const v = JSON.parse(await fsp.readFile(file, 'utf8')); return v && typeof v === 'object' ? v : null; } catch { return null; } };
 const writeJson = async (file, data) => {
@@ -36,7 +37,7 @@ const writeJson = async (file, data) => {
 };
 
 /* the files are parameters so a test can play the carry-over on files of its own */
-export async function readConfig({ file = CONFIG_FILE, oldFile = process.env.LAPKA_CONFIG ? null : OLD_CONFIG_FILE } = {}) {
+export async function readConfig({ file = CONFIG_FILE, oldFile = process.env.LAPKA_CONFIG || process.env.LAPKA_DATA_DIR ? null : OLD_CONFIG_FILE } = {}) {
   const cur = await readJson(file);
   if (cur) return cur;
   /* the old place, once: what was there goes to the system's place and stays there */

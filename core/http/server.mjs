@@ -17,10 +17,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import { createRequire } from 'node:module';
-import { contentType } from '../deliver/index.mjs';
+import { serveStream } from './stream.mjs';
 import { canPick, canOpen, pickFolder, openFolder } from '../store/folder.mjs';
 import { homeInside } from '../store/config.mjs';
 import { appendJournal } from '../store/journal.mjs';
@@ -119,6 +117,14 @@ export function startServer({ port, host = '127.0.0.1', webDir, ctx }) {
       const mutating = req.method === 'POST';
       if (mutating && req.headers['x-lapka'] !== '1') return json(res, 403, { error: 'x-lapka header required' });
 
+      if (ctx.airplay && mutating && p === '/api/airplay') {
+        const q = url.searchParams;
+        return json(res, 200, await ctx.airplay.prepare(q.get('stream'), q.has('audio') ? Number(q.get('audio')) : null));
+      }
+      if (ctx.airplay && mutating && p === '/api/airplay/stop') {
+        ctx.airplay.revoke(url.searchParams.get('token'));
+        return json(res, 200, { ok: true });
+      }
       if (store && mutating && p === '/api/home/open') {
         try { await openFolder(store.home); return json(res, 200, { ok: true }); }
         catch (e) { return json(res, 500, { error: e.message }); }
@@ -154,6 +160,7 @@ export function startServer({ port, host = '127.0.0.1', webDir, ctx }) {
         catch (e) { return json(res, 502, { error: e.message }); }
       }
       if (ctx.quit && mutating && p === '/api/update/start') {
+        if (installKind() === 'desktop') return json(res, 400, { error: 'Install the new macOS app or DMG to update Lapka' });
         if (installKind() === 'npx') return json(res, 400, { error: 'a Lapka run through npx is updated by the next npx' });
         const tag = url.searchParams.get('tag') || '';
         ctx.updateToken = { token: Math.random().toString(36).slice(2) + Date.now().toString(36), tag, until: Date.now() + 60 * 1000 };
@@ -356,36 +363,9 @@ export function startServer({ port, host = '127.0.0.1', webDir, ctx }) {
       if (delivery && (m = /^\/api\/stream\/([a-f0-9]{16})(?:\.(m3u8|mp4|vtt)|\/(pl|seg|key|cached))$/.exec(p))) {
         const entry = delivery.get(m[1]);
         if (!entry) return json(res, 404, { error: 'unknown stream' });
-        try {
-          /* what of the stream is on the disk already, for the page's timeline */
-          if (m[3] === 'cached') return json(res, 200, await delivery.cached(entry, { level: Number(url.searchParams.get('level')) || null }));
-          if (m[2] === 'vtt') {
-            const body = await delivery.text(entry);
-            res.writeHead(200, { 'content-type': 'text/vtt; charset=utf-8', 'content-length': Buffer.byteLength(body), 'cache-control': 'no-store' });
-            return res.end(body);
-          }
-          if (m[2] === 'm3u8' || m[3] === 'pl') {
-            const body = await delivery.playlist(entry, m[3] ? url.searchParams.get('u') : undefined);
-            res.writeHead(200, { 'content-type': 'application/vnd.apple.mpegurl', 'content-length': Buffer.byteLength(body), 'cache-control': 'no-store' });
-            return res.end(body);
-          }
-          if (m[3] === 'seg' || m[3] === 'key') {
-            const u = url.searchParams.get('u') || '';
-            const { bytes, hit } = await delivery.piece(entry, u);
-            res.writeHead(200, { 'content-type': contentType(u), 'content-length': bytes.length, 'cache-control': 'no-store', 'x-lapka-cache': hit ? 'hit' : 'miss' });
-            return res.end(bytes);
-          }
-          /* mp4: the range goes through, the answer comes back as it is */
-          const origin = await delivery.file(entry, req.headers.range);
-          const h = { 'content-type': origin.headers.get('content-type') || 'video/mp4', 'accept-ranges': 'bytes', 'cache-control': 'no-store' };
-          for (const k of ['content-length', 'content-range']) if (origin.headers.get(k)) h[k] = origin.headers.get(k);
-          res.writeHead(origin.status, h);
-          if (req.method === 'HEAD' || !origin.body) return res.end();
-          /* an origin that drops the connection mid-file ends this answer, not the program */
-          return pipeline(Readable.fromWeb(origin.body), res).catch(() => { if (!res.writableEnded) res.destroy(); });
-        } catch (e) {
-          return json(res, e.code || 500, { error: e.message });
-        }
+        if (m[3] === 'cached') return json(res, 200, await delivery.cached(entry, { level: Number(url.searchParams.get('level')) || null }));
+        await serveStream(req, res, { delivery, entry, kind: m[2] || m[3], target: m[3] ? url.searchParams.get('u') : undefined });
+        return;
       }
       /* the same look, told as it goes: a stream of events, a step each, then the answer */
       if (req.method === 'GET' && p === '/api/look/live') {
@@ -407,7 +387,7 @@ export function startServer({ port, host = '127.0.0.1', webDir, ctx }) {
       }
       json(res, 404, { error: 'not found' });
     } catch (e) {
-      json(res, 500, { error: e.message });
+      json(res, Number.isInteger(e.code) ? e.code : 500, { error: e.message });
     }
   });
 
@@ -416,7 +396,7 @@ export function startServer({ port, host = '127.0.0.1', webDir, ctx }) {
     server.listen(port, host, () => {
       const bound = server.address().port;
       for (const h of ['127.0.0.1', 'localhost', '[::1]']) hosts.add(`${h}:${bound}`);
-      ok({ port: bound, base: `http://${host}:${bound}`, close: () => new Promise(r => server.close(r)) });
+      ok({ port: bound, base: `http://${host}:${bound}`, close: ({ force = false } = {}) => new Promise(r => { server.close(r); if (force) server.closeAllConnections(); }) });
     });
   });
 }
