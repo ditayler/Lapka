@@ -7,6 +7,7 @@
 'use strict';
 
 const $ = (s, r = document) => r.querySelector(s);
+const macApp = !!window.webkit?.messageHandlers?.windowChrome;
 
 /* ═══════════════ interface language ═══════════════
    The dictionaries live in i18n.js and load through a plain script tag:
@@ -3019,14 +3020,17 @@ function buildGearMenu() {
   /* two paragraphs: what Lapka is and what the button does, then how to start it again */
   const quitNote = document.createElement('div');
   quitNote.className = 'cache__note quit__note';
-  quitNote.textContent = t('set.quitNote');
+  quitNote.textContent = t(macApp ? 'set.quitNoteMac' : 'set.quitNote', { quit: t('set.quit') });
   const quitStart = document.createElement('div');
   quitStart.className = 'cache__note quit__note';
-  quitStart.textContent = t('set.quitStart');
+  quitStart.textContent = t(macApp ? 'set.quitStartMac' : 'set.quitStart');
   const quitGuide = document.createElement('a');
   quitGuide.className = 'quit__guide';
   quitGuide.target = '_blank'; quitGuide.rel = 'noopener';
-  quitGuide.href = lang === 'ru' ? 'https://github.com/MythHand/Lapka/blob/main/docs/INSTALL.ru.md#как-выключить' : 'https://github.com/MythHand/Lapka/blob/main/docs/INSTALL.md#how-to-stop';
+  const quitDoc = macApp
+    ? (lang === 'ru' ? 'README.ru.md#приложение-для-macos' : 'README.md#macos-application')
+    : (lang === 'ru' ? 'docs/INSTALL.ru.md#как-выключить' : 'docs/INSTALL.md#how-to-stop');
+  quitGuide.href = 'https://github.com/MythHand/Lapka/blob/main/' + quitDoc;
   quitGuide.textContent = t('set.quitGuide');
   quitGuide.onclick = ev => ev.stopPropagation();
   const quit = document.createElement('button');
@@ -3267,6 +3271,7 @@ function showNotice(text, { action = null, onAction = null, onClose = null, kind
    typed by one who downloaded the folder would start another Lapka, with
    another folder of its own. Commands stand in the mono face. */
 function startAgain() {
+  if (macApp) return el('div', 'notice__how', t('set.quitStartMac'));
   const said = (key, cmd) => {
     const [a, b = ''] = t(key, { cmd: '\u0001', file: '\u0001' }).split('\u0001');
     const line = document.createDocumentFragment();
@@ -4709,7 +4714,6 @@ document.addEventListener('fullscreenchange', () => {
 
 /* ═══════════════ picture-in-picture ═══════════════ */
 const hasDocPip = 'documentPictureInPicture' in window;
-const macApp = !!window.webkit?.messageHandlers?.windowChrome;
 if (macApp) {
   // The native host supports system video PiP, so it needs one action rather
   // than a choice between browser APIs. Keep the normal round-button sizing.
