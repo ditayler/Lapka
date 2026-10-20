@@ -9,6 +9,24 @@ import { createBuildProgress } from './build-progress.mjs';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const exec = promisify(execFile);
 const run = (file, args) => exec(file, args, { timeout: 180000, maxBuffer: 4 * 1024 * 1024 });
+const TOOLS = path.join(ROOT, '.dev/build-cache/dmgbuild-1.6.5');
+const PYTHON = path.join(TOOLS, 'bin/python3');
+
+async function prepareTools(log) {
+  const requirements = path.join(ROOT, 'desktop/macos/dmg-requirements.txt');
+  const expected = await fsp.readFile(requirements, 'utf8');
+  const marker = path.join(TOOLS, 'requirements.txt');
+  if (await fsp.readFile(marker, 'utf8').catch(() => null) === expected
+      && await fsp.access(PYTHON).then(() => true, () => false)) {
+    log('Using cached, pinned dmgbuild tools');
+    return;
+  }
+  log('Installing hash-verified DMG build tools into .dev/build-cache (first build only)');
+  await run('/usr/bin/python3', ['-m', 'venv', TOOLS]);
+  await run(PYTHON, ['-I', '-m', 'pip', 'install', '--disable-pip-version-check', '--only-binary=:all:',
+    '--require-hashes', '-r', requirements]);
+  await fsp.writeFile(marker, expected);
+}
 
 async function realDestination(directory) {
   try { return await fsp.realpath(directory); }
@@ -49,7 +67,7 @@ export async function planDmg({ app, outputDir }) {
 
 export async function build(options) {
   if (process.platform !== 'darwin') throw Error('Build the DMG on macOS');
-  const { log, step } = createBuildProgress({ total: 7 });
+  const { log, step } = createBuildProgress({ total: 9 });
   const plan = await step('Reading application metadata', () => planDmg(options));
   log(`Lapka ${plan.version} · macOS ${plan.arch} · DMG`);
   log('Source: ' + plan.app);
@@ -60,6 +78,7 @@ export async function build(options) {
     if (stdout.trim() !== plan.version) throw Error('App version does not match its build metadata; rebuild with npm run build:macos');
     await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', plan.app]);
   });
+  await step('Preparing Finder layout tools', () => prepareTools(log));
   await fsp.mkdir(path.dirname(plan.output), { recursive: true });
   // Keep temporary copies hidden, and stage on the destination filesystem so
   // publishing the verified image is atomic. A failed build preserves old DMGs.
@@ -67,14 +86,37 @@ export async function build(options) {
   try {
     const payload = path.join(work, 'payload'), image = path.join(work, 'Lapka.dmg');
     const copied = path.join(payload, 'Lapka.app');
-    await step('Preparing application and Applications shortcut', async () => {
+    await step('Preparing application copy', async () => {
       await fsp.mkdir(payload);
       await run('/usr/bin/ditto', [plan.app, copied]);
-      await fsp.symlink('/Applications', path.join(payload, 'Applications'));
     });
     await step('Verifying copied application signature', () => run('/usr/bin/codesign', ['--verify', '--deep', '--strict', copied]));
-    await step('Creating compressed disk image', () => run('/usr/bin/hdiutil', ['create', '-volname', plan.volumeName, '-srcfolder', payload,
-      '-format', 'UDZO', '-fs', 'HFS+', '-imagekey', 'zlib-level=9', image]));
+    const icon = path.join(copied, 'Contents/Resources/Lapka.icns');
+    await step('Rendering dark installer artwork (standard and Retina)', async () => {
+      const artwork = path.join(work, 'artwork');
+      const cache = path.join(ROOT, '.dev/build-cache/swift');
+      await fsp.mkdir(cache, { recursive: true });
+      await run('/usr/bin/xcrun', ['swiftc', path.join(ROOT, 'desktop/macos/DmgArtwork.swift'),
+        '-module-cache-path', cache, '-framework', 'AppKit', '-o', artwork]);
+      await run(artwork, [icon, plan.version, plan.arch, work]);
+    });
+    await step('Creating compressed DMG with Finder layout', async () => {
+      const settings = {
+        format: 'UDZO', filesystem: 'HFS+', compression_level: 9,
+        files: [copied], symlinks: { Applications: '/Applications' },
+        icon, background: path.join(work, 'background.png'),
+        window_rect: [[160, 160], [720, 440]], default_view: 'icon-view',
+        icon_locations: { 'Lapka.app': [200, 231], Applications: [520, 231] },
+        // SetFile's hide-extension flag adds FinderInfo to the signed app.
+        // Keep the bundle untouched so a copied installation still verifies.
+        icon_size: 112, text_size: 14,
+        show_status_bar: false, show_tab_view: false, show_toolbar: false,
+        show_pathbar: false, show_sidebar: false,
+      };
+      const config = path.join(work, 'settings.json');
+      await fsp.writeFile(config, JSON.stringify(settings));
+      await run(PYTHON, ['-I', path.join(ROOT, 'desktop/macos/dmg.py'), config, image, plan.volumeName]);
+    });
     await step('Verifying disk image integrity', () => run('/usr/bin/hdiutil', ['verify', image]));
     await step('Saving DMG', () => fsp.rename(image, plan.output));
     log(`DMG size: ${((await fsp.stat(plan.output)).size / 1024 / 1024).toFixed(1)} MiB`);
