@@ -1,7 +1,5 @@
 # Installing Lapka step by step
 
-Русская версия: [INSTALL.ru.md](INSTALL.ru.md)
-
 On macOS 13.5+, build `Lapka.app` with bundled Node.js, unzip it, move it into
 Applications, and launch its icon. See [application build and behavior](../README.md#macos-application).
 Watching in this app needs no terminal or separately installed Node.js;

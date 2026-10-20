@@ -3029,7 +3029,7 @@ function buildGearMenu() {
   quitGuide.target = '_blank'; quitGuide.rel = 'noopener';
   const quitDoc = macApp
     ? 'README.md#macos-application'
-    : (lang === 'ru' ? 'docs/INSTALL.ru.md#как-выключить' : 'docs/INSTALL.md#how-to-stop');
+    : 'docs/INSTALL.md#how-to-stop';
   quitGuide.href = 'https://github.com/' + (macApp ? 'ditayler/Lapka' : 'MythHand/Lapka') + '/blob/main/' + quitDoc;
   quitGuide.textContent = t('set.quitGuide');
   quitGuide.onclick = ev => ev.stopPropagation();
