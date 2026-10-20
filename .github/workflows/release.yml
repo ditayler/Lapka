@@ -62,7 +62,7 @@ jobs:
           RELEASE_TAG: ${{ steps.release.outputs.new_release_git_tag }}
         run: |
           if [ "$PUBLISHED" = true ]; then
-            echo "Prepared **$RELEASE_TAG** as a draft. macOS builds will upload DMG, ZIP and checksums, then publish it." >> "$GITHUB_STEP_SUMMARY"
+            echo "Prepared **$RELEASE_TAG** as a draft. macOS builds will upload two DMGs, add checksum notes, then publish it." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "No releasable commits since the latest tag; version and downloads are unchanged." >> "$GITHUB_STEP_SUMMARY"
           fi
