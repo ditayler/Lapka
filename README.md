@@ -104,9 +104,13 @@ window and Retina artwork. Its first build downloads pinned, hash-verified
 Python packaging tools into `.dev/build-cache/`; Python 3.9+ is supplied by the
 Xcode Command Line Tools. These tools are only needed to build the DMG.
 
-Finder uses a fixed picture background, so the dark canvas extends to
-4096 × 2304 points to cover enlarged windows. Support-file icons sit outside
-that area when Finder reveals hidden files; packaging preserves that preference.
+The image requests a 720 × 440 point window without a sidebar. Finder can inherit
+an existing window's size and sidebar when opening the disk as a tab (for example,
+with macOS's “Prefer tabs when opening documents” set to “Always”). A separate
+Finder window can use the image's compact layout. The fixed dark background
+extends to 4096 × 2304 points for enlarged windows. If Finder reveals hidden
+files, their icons sit below the artwork within its width, avoiding horizontal
+scrolling. Packaging preserves the user's Finder and tab preferences.
 
 For a custom existing bundle or output folder:
 

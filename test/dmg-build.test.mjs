@@ -94,10 +94,16 @@ with DSStore.open(sys.argv[1], 'r') as store:
     assert store['.']['icvl'] == (b'type', b'icnv')
     assert store['.']['icvp']['backgroundType'] == 2
     assert not store['.']['bwsp']['ShowToolbar']
+    assert not store['.']['bwsp']['ShowSidebar']
+    assert store['.']['bwsp']['WindowBounds'] == '{{160, 160}, {720, 440}}'
+    assert store['.']['icvp']['scrollPositionX'] == 0
+    assert store['.']['icvp']['scrollPositionY'] == 0
     left, right = store['Lapka.app']['Iloc'], store['Applications']['Iloc']
     assert left[0] < right[0] and left[1] == right[1]
     for name in ('.background.tiff', '.VolumeIcon.icns'):
-        assert store[name]['Iloc'][0] > 4096, 'support files stay outside the installer canvas'
+        x, y = store[name]['Iloc']
+        assert 56 <= x <= 720 - 56, 'support files must not create horizontal scrolling'
+        assert y > 2304, 'support files stay below the installer canvas'
 `, path.join(mount, '.DS_Store')]);
     const installed = path.join(dir, 'Applications/Lapka.app');
     await fsp.mkdir(path.dirname(installed));
