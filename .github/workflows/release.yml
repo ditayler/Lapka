@@ -38,8 +38,8 @@ jobs:
       - name: Check sources
         run: npm run check
 
-      # npm prepares package.json and package-lock.json before git commits and
-      # tags them. GitHub gets a draft until the macOS downloads are ready.
+      # Prepare CHANGELOG.md and package versions before git commits and tags
+      # them. GitHub gets a draft until the macOS downloads are ready.
       - name: Release
         id: release
         uses: cycjimmy/semantic-release-action@v8
@@ -48,6 +48,7 @@ jobs:
           repository_url: https://github.com/${{ github.repository }}.git
           extra_plugins: |
             @semantic-release/git@10
+            @semantic-release/changelog@6
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GIT_AUTHOR_NAME: github-actions[bot]

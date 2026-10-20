@@ -138,7 +138,8 @@ and a `BREAKING CHANGE:` footer a major version. Use these in squash commit
 messages too. If no commits qualify, it leaves the version unchanged and skips
 packaging. npm publishing is disabled.
 
-The release job updates and commits `package.json` and `package-lock.json`,
+The release job prepends generated notes to `CHANGELOG.md` and commits it
+together with the updated `package.json` and `package-lock.json`,
 creates `vX.Y.Z` and a draft GitHub Release with generated notes, then calls **macOS
 release** with that exact tag. This uses the built-in `GITHUB_TOKEN`; no extra
 secret is needed while `main` permits the bot's version commit. Protecting
