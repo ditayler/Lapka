@@ -1,7 +1,7 @@
 import AppKit
 import WebKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, NSMenuItemValidation {
     let server: ServerProcess
     private let websiteDataStore: WKWebsiteDataStore
     private(set) var window: NSWindow?
@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private let chrome = WindowChrome()
     private var terminating = false
     private var failed = false
+    private var playerReady = false
 
     init(resources: URL, dataDirectory: URL, logDirectory: URL, port: Int, websiteDataStore: WKWebsiteDataStore = .default()) {
         self.server = ServerProcess(resources: resources, dataDirectory: dataDirectory, logDirectory: logDirectory, port: port)
@@ -80,7 +81,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         view.load(URLRequest(url: url))
     }
 
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        playerReady = false
+    }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        playerReady = true
         chrome.navigationFinished()
         loading?.removeFromSuperview()
         webView.isHidden = false
@@ -92,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         if !terminating { showFailure(error.localizedDescription) }
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        playerReady = false
         if !terminating { webView.reload() }
     }
     private func isLocal(_ url: URL) -> Bool {
@@ -153,6 +159,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         server.stop(completion)
     }
     @objc private func reloadPlayer() { webView?.reload() }
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(checkForUpdates) {
+            return playerReady && !failed && !terminating && server.isRunning
+        }
+        return true
+    }
+    @objc private func checkForUpdates() {
+        guard playerReady, !failed, !terminating, let view = webView,
+              let url = view.url, isLocal(url) else { return }
+        window?.deminiaturize(nil)
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        view.evaluateJavaScript("window.dispatchEvent(new Event('lapka:check-for-updates'));", completionHandler: nil)
+    }
     private func makeMenus() {
         let menu = NSMenu()
         func group(_ title: String) -> NSMenu {
@@ -164,6 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
         let app = group("Lapka")
         add(app, "About Lapka", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), "", NSApp)
+        add(app, "Check for Updates…", #selector(checkForUpdates), "", self)
         app.addItem(.separator())
         add(app, "Hide Lapka", #selector(NSApplication.hide(_:)), "h", NSApp)
         app.addItem(.separator())
