@@ -98,7 +98,18 @@ npm run build:dmg
 The builder creates `Lapka.app`, a ZIP and a versioned DMG in
 `dist/macos-arm64/` on Apple Silicon, or `dist/macos-x64/` on Intel. It downloads
 an official Node.js runtime and verifies its SHA-256 checksum. The DMG uses
-the built app's recorded version and architecture.
+the built app's recorded version and architecture, with a dark drag-to-Applications
+window and Retina artwork. Its first build downloads pinned, hash-verified
+Python packaging tools into `.dev/build-cache/`; Python 3.9+ is supplied by the
+Xcode Command Line Tools. These tools are only needed to build the DMG.
+
+The image requests a 720 × 440 point window without a sidebar. Finder can inherit
+an existing window's size and sidebar when opening the disk as a tab (for example,
+with macOS's “Prefer tabs when opening documents” set to “Always”). A separate
+Finder window can use the image's compact layout. The fixed dark background
+extends to 4096 × 2304 points for enlarged windows. If Finder reveals hidden
+files, their icons sit below the artwork within its width, avoiding horizontal
+scrolling. Packaging preserves the user's Finder and tab preferences.
 
 For a custom existing bundle or output folder:
 
@@ -108,6 +119,16 @@ npm run build:dmg -- --app=/path/Lapka.app --output-dir=/path/releases
 
 Quit an app running from the build output before rebuilding it. Packaging an
 existing app as a DMG does not require stopping it.
+
+To check the packaged Finder layout, Applications shortcut and signature after
+copying the app to a temporary installation folder:
+
+```sh
+LAPKA_DMG_TEST_APP=dist/macos-arm64/Lapka.app node --test test/dmg-build.test.mjs
+```
+
+Use `macos-x64` on Intel. The opt-in test builds and mounts a temporary DMG;
+it does not replace the installed app or open the player.
 
 ```sh
 npm run check

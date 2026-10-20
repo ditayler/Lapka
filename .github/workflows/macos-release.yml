@@ -79,6 +79,9 @@ jobs:
       - name: Package DMG
         run: npm run build:dmg -- --app="dist/macos-$BUILD_ARCH/Lapka.app"
 
+      - name: Verify Finder layout and app installation
+        run: LAPKA_DMG_TEST_APP="dist/macos-$BUILD_ARCH/Lapka.app" node --test test/dmg-build.test.mjs
+
       - name: Record checksums
         working-directory: dist/macos-${{ matrix.arch }}
         env:
