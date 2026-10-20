@@ -3,6 +3,25 @@
 The releases of Lapka, newest first. The "Check for an update" button in the
 settings looks at the same releases on GitHub.
 
+## 1.5.0 — 20 October 2026
+
+
+### Bug Fixes
+
+* add a dark macOS drag-and-drop installer ([aa26d54](https://github.com/ditayler/Lapka/commit/aa26d54355edcccfb4edc3b7e3bc2b48b117aea9))
+* add Check for Updates to the macOS menu ([f4bba4d](https://github.com/ditayler/Lapka/commit/f4bba4dec6097fc2701370eda50225507539ece2))
+* avoid horizontal scrolling in macOS installer ([4daf10b](https://github.com/ditayler/Lapka/commit/4daf10bfba1ddea58c044202efe6daaa17a2bd18))
+* cover enlarged macOS installer windows ([dd45dee](https://github.com/ditayler/Lapka/commit/dd45dee4808f92f7d78ea4298ff40171a77ffc00))
+* preserve original changelog heading format ([af32232](https://github.com/ditayler/Lapka/commit/af3223252f0f633836280afa7bcebd74594bd42d))
+* preserve original changelog heading format ([e9b3757](https://github.com/ditayler/Lapka/commit/e9b37572f629416b63a08148e76f1cf03377d4fc))
+* publish only DMG assets for macOS releases ([35efa3a](https://github.com/ditayler/Lapka/commit/35efa3aa77bfc6a9337202e499d821bf54dc4286))
+
+
+### Features
+
+* add a dark macOS drag-and-drop installer ([46cfca2](https://github.com/ditayler/Lapka/commit/46cfca268c3497ee1ec2f63e7b3ce1cd9f1c43ac))
+* add Check for Updates to the macOS menu ([c42f367](https://github.com/ditayler/Lapka/commit/c42f367aed9680ec03a9d839fee097e28d749c3f))
+
 ## 1.4.0 — 20 October 2026
 
 
