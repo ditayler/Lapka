@@ -3028,9 +3028,9 @@ function buildGearMenu() {
   quitGuide.className = 'quit__guide';
   quitGuide.target = '_blank'; quitGuide.rel = 'noopener';
   const quitDoc = macApp
-    ? (lang === 'ru' ? 'README.ru.md#приложение-для-macos' : 'README.md#macos-application')
+    ? 'README.md#macos-application'
     : (lang === 'ru' ? 'docs/INSTALL.ru.md#как-выключить' : 'docs/INSTALL.md#how-to-stop');
-  quitGuide.href = 'https://github.com/MythHand/Lapka/blob/main/' + quitDoc;
+  quitGuide.href = 'https://github.com/' + (macApp ? 'ditayler/Lapka' : 'MythHand/Lapka') + '/blob/main/' + quitDoc;
   quitGuide.textContent = t('set.quitGuide');
   quitGuide.onclick = ev => ev.stopPropagation();
   const quit = document.createElement('button');

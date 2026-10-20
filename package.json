@@ -1,7 +1,7 @@
 {
   "name": "@mythhand/lapka",
   "version": "1.3.0",
-  "description": "Lapka: a local anime player. Paste a link, it finds the episodes and the dubs, plays them and saves them to your folder.",
+  "description": "Lapka: a local player. Paste a link, it finds the episodes and the dubs, plays them and saves them to your folder.",
   "bin": {
     "lapka": "core/main.mjs"
   },
@@ -21,7 +21,6 @@
     "LICENSES",
     "TRADEMARKS.md",
     "TRADEMARKS.ru.md",
-    "README.ru.md",
     "docs/INSTALL.md",
     "docs/INSTALL.ru.md",
     "web/**",
@@ -29,13 +28,13 @@
     "!web/assets/*.png",
     "!web/assets/*.svg"
   ],
-  "homepage": "https://github.com/MythHand/Lapka#readme",
+  "homepage": "https://github.com/ditayler/Lapka#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MythHand/Lapka.git"
+    "url": "git+https://github.com/ditayler/Lapka.git"
   },
   "bugs": {
-    "url": "https://github.com/MythHand/Lapka/issues"
+    "url": "https://github.com/ditayler/Lapka/issues"
   },
   "engines": {
     "node": ">=22"

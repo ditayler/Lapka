@@ -7,9 +7,7 @@
 
 # Lapka
 
-Русская версия: [README.ru.md](README.ru.md)
-
-A local anime player. Paste a link to an anime or to a single episode: Lapka
+A local player. Paste a link to a video, a series or a single episode: Lapka
 reads the page, finds the episodes, dubs, qualities and subtitles, and shows
 it all in its own player. Episodes follow one another, the dub you chose is
 kept for the whole series, and any episode can be saved as one file into your
@@ -89,7 +87,7 @@ Build `Lapka.app` for macOS 13.5 or newer. Unzip `Lapka-macos-arm64.zip` (Apple
 Silicon) or `Lapka-macos-x64.zip` (Intel), move the app into Applications, and
 open its icon. Node.js is included, and the player runs in its own WebKit window:
 no terminal, npm or separate browser is needed to launch it. Release builds
-publish DMG and ZIP downloads in [Releases](https://github.com/MythHand/Lapka/releases).
+publish DMG and ZIP downloads in [Releases](https://github.com/ditayler/Lapka/releases).
 
 Closing the window keeps the app in the Dock; opening its icon restores the
 window. Cmd-Q, **Lapka → Quit Lapka**, and the player's Quit action stop the app
@@ -131,13 +129,30 @@ For a custom app location or destination, use
 `npm run build:dmg -- --app=/path/Lapka.app --output-dir=/path/releases`.
 The app can remain running while the DMG is packaged.
 
-Publishing a GitHub Release runs **macOS release** for Apple Silicon and Intel.
-It checks out that release's tag and builds a fresh app, DMG and ZIP on each
-architecture. The tag (`v1.3.0` or `1.3.0`, for example) must match `package.json`.
-After both builds succeed, their DMGs, ZIPs and SHA-256 checksums are attached
-to the release. Actions artifacts are also available for 30 days. To rebuild an
-existing release, run the workflow manually with its tag. The tagged commit
-must contain the macOS build scripts and this workflow.
+To publish a new version, open **Actions → Release → Run workflow** on `main`.
+Like the `ReleaseBoardGameP2P` release workflow, `semantic-release` uses commits
+since the latest version tag: lowercase `fix:` produces a patch, `feat:` a minor,
+and a `BREAKING CHANGE:` footer a major version. Use these in squash commit
+messages too. If no commits qualify, it leaves the version unchanged and skips
+packaging. npm publishing is disabled.
+
+The release job prepends generated notes to `CHANGELOG.md` and commits it
+together with the updated `package.json` and `package-lock.json`,
+creates `vX.Y.Z` and a draft GitHub Release with generated notes, then calls **macOS
+release** with that exact tag. This uses the built-in `GITHUB_TOKEN`; no extra
+secret is needed while `main` permits the bot's version commit. Protecting
+`main` will require adjusting release authentication and branch rules.
+
+The macOS workflow builds a fresh app, DMG and ZIP on Apple Silicon and Intel.
+The tag must match `package.json`. After both builds succeed, their downloads
+and SHA-256 checksums are attached, then the draft is published. A failed build
+leaves the release as a draft, so users see the new version in Releases only
+after both architectures are ready. Actions artifacts are also available for
+30 days. A manually published GitHub Release still starts this
+workflow. To retry a failed macOS build or rebuild an existing release, run
+**macOS release** manually with its tag (including a draft left after failure);
+rerunning **Release** without new releasable commits does not rebuild downloads. The tagged commit must contain
+the macOS build scripts. Settings checks for updates in this fork's Releases.
 
 To update on macOS, check the version in Settings, download the new DMG for your
 Mac, quit Lapka with Cmd-Q, and drag the new app into Applications, replacing
@@ -269,6 +284,7 @@ it is the tooling for working on Lapka's code, not needed for watching.
   The tests of real sites are kept outside the repository together with the snapshots
   of their pages.
 - The map of the core and the contracts of its blocks: [core/README.md](core/README.md).
+- Guidance for coding agents: [AGENTS.md](AGENTS.md).
 
 ![npm test: 124 tests pass](docs/media/tests.png)
 

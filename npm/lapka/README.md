@@ -1,6 +1,6 @@
 # lapka
 
-Lapka, the local anime player, by its short name.
+Lapka, the local player, by its short name.
 
 ```bash
 npx -y lapka

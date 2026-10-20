@@ -1,7 +1,5 @@
 # What's new
 
-Русская версия: [CHANGELOG.ru.md](CHANGELOG.ru.md)
-
 The releases of Lapka, newest first. The "Check for an update" button in the
 settings looks at the same releases on GitHub.
 
