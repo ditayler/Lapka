@@ -3,7 +3,7 @@
 The releases of Lapka, newest first. The "Check for an update" button in the
 settings looks at the same releases on GitHub.
 
-# [1.4.0](https://github.com/ditayler/Lapka/compare/v1.3.0...v1.4.0) (2026-10-20)
+## 1.4.0 — 20 October 2026
 
 
 ### Bug Fixes

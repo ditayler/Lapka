@@ -102,7 +102,8 @@ repository when running `gh` commands, and follow the user's requested target.
 - Use Conventional Commits: `fix:` for patch, `feat:` for minor, and a
   `BREAKING CHANGE:` footer for major. Squash messages need the same format.
 - [Release](.github/workflows/release.yml) is dispatched manually on `main`.
-  [.releaserc.json](.releaserc.json) controls version analysis and generated notes.
+  [.releaserc.cjs](.releaserc.cjs) controls version analysis and generated notes.
+  Use headings such as `## 1.4.0 — 20 October 2026`, with English dates in UTC.
 - The changelog plugin prepends notes while preserving existing history. It runs
   before npm/git preparation; the version commit includes `CHANGELOG.md`,
   `package.json` and `package-lock.json`. Do not manually bump versions for a
