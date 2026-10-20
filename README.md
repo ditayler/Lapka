@@ -7,8 +7,6 @@
 
 # Lapka
 
-Русская версия: [README.ru.md](README.ru.md)
-
 A local anime player. Paste a link to an anime or to a single episode: Lapka
 reads the page, finds the episodes, dubs, qualities and subtitles, and shows
 it all in its own player. Episodes follow one another, the dub you chose is
