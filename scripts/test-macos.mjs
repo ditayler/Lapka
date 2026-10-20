@@ -32,7 +32,7 @@ try {
   const clip = path.join(work, 'video.mp4');
   await exec(executable, ['--generate-video', clip], { timeout: 30000 });
   media = await fsp.readFile(clip);
-  for (const mode of (process.env.LAPKA_NATIVE_TEST_MODE ? [process.env.LAPKA_NATIVE_TEST_MODE] : ['media', 'pip', 'autohide', 'quit', 'parent-exit'])) {
+  for (const mode of (process.env.LAPKA_NATIVE_TEST_MODE ? [process.env.LAPKA_NATIVE_TEST_MODE] : ['media', 'pip', 'autohide', 'updates', 'quit', 'parent-exit'])) {
     const child = spawn(executable, [resources, path.join(work, 'data-' + mode), site, mode], { stdio: ['ignore', 'pipe', 'inherit'] });
     let output = '';
     child.stdout.on('data', b => { output += b; process.stdout.write(b); });

@@ -2967,6 +2967,9 @@ function paintUpdate() {
 async function updateClick() {
   if (update.phase === 'done') { location.reload(); return; }
   if (update.phase === 'newer') return startUpdate();
+  return checkForUpdate();
+}
+async function checkForUpdate() {
   if (update.phase === 'checking' || update.phase === 'updating' || update.phase === 'restarting') return;
   update.phase = 'checking'; paintUpdate();
   try {
@@ -3162,6 +3165,16 @@ btnGear.onclick = e => {
   gearMenu.classList.toggle('open');
   if (opening) pressGearPaw();
 };
+
+if (macApp) window.addEventListener('lapka:check-for-updates', () => {
+  poke();
+  buildGearMenu();
+  closeMenus(gearMenu);
+  gearMenu.classList.add('open');
+  checkServer();
+  checkForUpdate();
+  gearMenu.querySelector('.upd')?.scrollIntoView({ block: 'nearest' });
+});
 
 btnSubs.onclick = e => {
   e.stopPropagation();

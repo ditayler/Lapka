@@ -79,7 +79,9 @@ Choose your video folder in Settings. Settings and the initial library live in
 `~/Library/Logs/Lapka/server.log`. Replacing or removing the app does not delete
 your library or settings.
 
-Check for updates in Settings, then download the new DMG from
+Choose **Lapka → Check for Updates…** in the macOS menu bar, or check in
+Settings. The menu opens Settings and immediately checks for a published
+release, including when the player window is closed. Then download the DMG from
 [Releases](https://github.com/ditayler/Lapka/releases). Quit Lapka with **Cmd-Q**
 and drag the new app into Applications, replacing the old one. Installation
 of updates is currently manual.

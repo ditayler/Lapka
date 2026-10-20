@@ -59,6 +59,11 @@ struct NativeSmoke {
                 checking = false
                 guard let result = value as? [String: Any] else { return }
                 if phase == 0 {
+                    if mode == "updates" {
+                        timer.invalidate()
+                        updateMenuChecks(view: view)
+                        return
+                    }
                     if mode == "pip", !seededPipMode {
                         seededPipMode = true
                         view.evaluateJavaScript("localStorage.setItem('lapka.pipMode','document');") { _, _ in view.reload() }
@@ -109,6 +114,58 @@ struct NativeSmoke {
             }
         }
         app.run()
+    }
+    static func updateMenuChecks(view: WKWebView) {
+        delegate.window?.ignoresMouseEvents = true
+        delegate.window?.makeFirstResponder(nil)
+        guard let menu = NSApp.mainMenu?.items.first?.submenu,
+              let item = menu.items.first(where: { $0.title == "Check for Updates…" }),
+              let action = item.action else { fail("Check for Updates menu item missing"); return }
+        view.evaluateJavaScript("""
+        window.__updateChecks=0; window.__updateResult='available';
+        document.querySelector('#stage').classList.add('idle','cursor-hidden');
+        const originalFetch=window.fetch;
+        window.fetch=async (url, options) => {
+          if (url === '/api/update/check') {
+            window.__updateChecks++;
+            await new Promise(r=>setTimeout(r,100));
+            if (window.__updateResult === 'error') return new Response(JSON.stringify({error:'test network failure'}),{status:503});
+            return new Response(JSON.stringify({current:'1.4.0',latest:'9.0.0',tag:'v9.0.0',kind:'desktop',newer:window.__updateResult==='available'}));
+          }
+          if (String(url).startsWith('/api/update/start')) { window.__unexpectedInstall=true; throw Error('must not install'); }
+          return originalFetch(url,options);
+        };
+        void 0;
+        """) { _, error in
+            if let error = error { fail(error.localizedDescription); return }
+            delegate.window?.performClose(nil)
+            guard NSApp.sendAction(action, to: item.target, from: item),
+                  NSApp.sendAction(action, to: item.target, from: item) else { fail("menu action unavailable"); return }
+            waitCondition(view: view, condition: "document.querySelector('#gearMenu').classList.contains('open') && document.querySelector('.upd__note').textContent.includes('9.0.0') && getComputedStyle(document.querySelector('#gearWrap')).opacity === '1' && !document.querySelector('#stage').classList.contains('cursor-hidden')") {
+                guard delegate.window?.isVisible == true else { fail("update check did not reopen the window"); return }
+                view.evaluateJavaScript("window.__updateChecks === 1 && !window.__unexpectedInstall") { value, _ in
+                    guard value as? Bool == true else { fail("duplicate update requests or unexpected installation"); return }
+                    updateMenuResult(view: view, item: item, result: "latest", count: 2) {
+                        updateMenuResult(view: view, item: item, result: "error", count: 3) {
+                            updateMenuResult(view: view, item: item, result: "available", count: 4) {
+                                (delegate as WKNavigationDelegate).webView?(view, didStartProvisionalNavigation: nil)
+                                menu.update()
+                                guard !item.isEnabled else { fail("update menu enabled during navigation"); return }
+                                delegate.shutdown { print("PASS: native update menu reopens settings, checks once, reports available/latest/error, retries and disables during navigation"); exit(0) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    static func updateMenuResult(view: WKWebView, item: NSMenuItem, result: String, count: Int, completion: @escaping () -> Void) {
+        let literal = String(data: try! JSONSerialization.data(withJSONObject: [result]), encoding: .utf8)!
+        view.evaluateJavaScript("window.__updateResult=\(literal)[0];") { _, _ in
+            NSApp.sendAction(item.action!, to: item.target, from: item)
+            let note = result == "available" ? "note.includes('9.0.0')" : result == "error" ? "note.includes('test network failure')" : "!note.includes('9.0.0') && note.length > 0"
+            waitCondition(view: view, condition: "(() => { const note=document.querySelector('.upd__note').textContent; return window.__updateChecks===\(count) && !document.querySelector('.upd__btn').disabled && \(note) && !window.__unexpectedInstall; })()", completion: completion)
+        }
     }
     static func autohideChecks(view: WKWebView, step: Int = 0) {
         visibilityStep = step
