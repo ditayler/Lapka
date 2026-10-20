@@ -7,7 +7,7 @@
 
 # Lapka
 
-A local anime player. Paste a link to an anime or to a single episode: Lapka
+A local player. Paste a link to a video, a series or a single episode: Lapka
 reads the page, finds the episodes, dubs, qualities and subtitles, and shows
 it all in its own player. Episodes follow one another, the dub you chose is
 kept for the whole series, and any episode can be saved as one file into your
