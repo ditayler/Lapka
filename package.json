@@ -22,7 +22,6 @@
     "TRADEMARKS.md",
     "TRADEMARKS.ru.md",
     "docs/INSTALL.md",
-    "docs/INSTALL.ru.md",
     "web/**",
     "!web/seal.html",
     "!web/assets/*.png",

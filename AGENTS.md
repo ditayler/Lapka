@@ -8,9 +8,10 @@ Keep playback and the user's library local; preserve browser and macOS use cases
 
 - [README.md](README.md) covers the product, installation, building and releases.
 - [core/README.md](core/README.md) describes the backend modules and contracts.
-- Keep the root README and CHANGELOG in English. Do not recreate root
-  `README.ru.md` or `CHANGELOG.ru.md` unless requested. Localized installation
-  guides and module documentation still exist and should keep working links.
+- Keep the root README, CHANGELOG and installation guide in English. Do not
+  recreate `README.ru.md`, `CHANGELOG.ru.md` or `docs/INSTALL.ru.md` unless
+  requested. Localized module documentation still exists and should keep
+  working links.
 - UI text lives in [web/i18n.js](web/i18n.js). Update all ten dictionaries when
   adding or changing shared wording; preserve translation keys and placeholders.
 

@@ -1,7 +1,5 @@
 # Installing Lapka step by step
 
-Русская версия: [INSTALL.ru.md](INSTALL.ru.md)
-
 On macOS 13.5+, build `Lapka.app` with bundled Node.js, unzip it, move it into
 Applications, and launch its icon. See [application build and behavior](../README.md#macos-application).
 Watching in this app needs no terminal or separately installed Node.js;
@@ -242,7 +240,7 @@ developers' command, which also starts a test site whose clips are made with
 ffmpeg; to watch, use `npm start` or the launcher.
 
 **A site did not open.** Not every site is built the same way; the list of
-tested ones is in the [README](../README.md). Sites with DRM, and sites that
+tested ones is in the [upstream README](https://github.com/MythHand/Lapka#readme). Sites with DRM, and sites that
 lock their players, Lapka does not break into, on principle.
 
 **No extended PiP window.** It exists only in Chrome and Edge (Document
