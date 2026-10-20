@@ -109,8 +109,9 @@ repository when running `gh` commands, and follow the user's requested target.
   normal automated release. npm publishing is disabled.
 - Semantic-release creates a version tag and draft. The reusable
   [macOS release workflow](.github/workflows/macos-release.yml) builds that exact
-  tag for Apple Silicon and Intel, verifies checksums, uploads downloads, then
-  publishes the draft only after both builds succeed.
+  tag for Apple Silicon and Intel, verifies checksums, uploads only the two
+  DMGs, and adds their checksums to release notes before publishing the draft.
+  ZIPs and checksum files stay in Actions artifacts. Both builds must succeed.
 - No releasable commits means no new version or packaging. After a packaging
   failure, rerun **macOS release** with the existing tag; the draft remains.
 - Release automation uses the built-in `GITHUB_TOKEN`. Changes to branch

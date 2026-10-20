@@ -51,9 +51,8 @@ open pages and does not bypass DRM or deliberately locked players.
 3. Open the DMG and drag **Lapka** into **Applications**.
 4. Launch **Lapka** from Applications, the Dock or Spotlight.
 
-ZIP downloads are also available: unzip one and move `Lapka.app` into
-Applications. Node.js is bundled; no terminal, npm or separate browser is
-needed to launch the app.
+Node.js is bundled; no terminal, npm or separate browser is needed to launch
+the app.
 
 Current downloads are experimental, ad-hoc signed and not notarized.
 macOS Gatekeeper may block the first launch after downloading. Developer ID
@@ -133,8 +132,9 @@ the next version from commits: `fix:` for patch, `feat:` for minor, and a
 
 The job updates `CHANGELOG.md`, `package.json` and `package-lock.json`, commits
 them, and creates a tag and draft GitHub Release. It then builds that exact tag
-for Apple Silicon and Intel, uploads DMGs, ZIPs and SHA-256 checksums, and
-publishes the draft only after both builds succeed. npm publishing is disabled.
+for Apple Silicon and Intel, uploads the two DMGs, adds their SHA-256 checksums
+to the release notes, and publishes the draft only after both builds succeed.
+ZIPs and checksum files remain in the Actions artifacts. npm publishing is disabled.
 
 If there are no releasable commits, no version or downloads are created. If
 packaging fails, rerun **macOS release** with the existing tag to finish the

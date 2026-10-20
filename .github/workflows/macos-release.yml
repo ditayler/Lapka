@@ -127,10 +127,36 @@ jobs:
           # Developer ID signing/notarization is not configured yet. Make the
           # current experimental signing status visible beside each download.
           assets=()
-          for asset in release/*.dmg release/*.zip; do
+          for asset in release/*.dmg; do
             assets+=("$asset#$(basename "$asset") (experimental, ad-hoc signed, not notarized)")
           done
-          gh release upload "$RELEASE_TAG" "${assets[@]}" release/*.sha256 --clobber
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+
+      - name: Add DMG checksums to release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view "$RELEASE_TAG" --json body --jq .body > release-notes.md
+          (cd release && sha256sum "Lapka-${RELEASE_TAG#v}-macos-arm64.dmg" "Lapka-${RELEASE_TAG#v}-macos-x64.dmg") > dmg-checksums.txt
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          notes = Path('release-notes.md').read_text()
+          sums = Path('dmg-checksums.txt').read_text().strip()
+          start = '<!-- lapka-macos-checksums:start -->'
+          end = '<!-- lapka-macos-checksums:end -->'
+          section = f'{start}\n<details>\n<summary>DMG SHA-256 checksums</summary>\n\n```text\n{sums}\n```\n</details>\n{end}'
+          if notes.count(start) != notes.count(end) or notes.count(start) > 1:
+              raise ValueError('Malformed macOS checksum section in release notes')
+          if start in notes:
+              before, rest = notes.split(start, 1)
+              _, after = rest.split(end, 1)
+              notes = before + section + after
+          else:
+              notes = notes.rstrip() + '\n\n' + section + '\n'
+          Path('release-notes.md').write_text(notes.rstrip() + '\n')
+          PYTHON
+          gh release edit "$RELEASE_TAG" --notes-file release-notes.md
 
       - name: Publish the release after both macOS downloads are uploaded
         env:
