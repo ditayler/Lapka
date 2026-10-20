@@ -3,6 +3,25 @@
 The releases of Lapka, newest first. The "Check for an update" button in the
 settings looks at the same releases on GitHub.
 
+# [1.4.0](https://github.com/ditayler/Lapka/compare/v1.3.0...v1.4.0) (2026-10-20)
+
+
+### Bug Fixes
+
+* describe Lapka as a general video player ([702e4ab](https://github.com/ditayler/Lapka/commit/702e4ab8d20cd88b2424de165d9178bb0bfd15ba))
+* tailor quit and restart guidance for macOS app ([9ad01c2](https://github.com/ditayler/Lapka/commit/9ad01c2a11ec5c4dacfb9575a79d5cf20cc040d0))
+
+
+### Features
+
+* add experimental Safari AirPlay streaming ([5ef10eb](https://github.com/ditayler/Lapka/commit/5ef10ebe001ab77e57fe5284a2a7f593461b2fa4))
+* add standalone macOS app with native playback controls ([6672937](https://github.com/ditayler/Lapka/commit/66729374e17727c56952cec6c2602de2613f3822))
+* add versioned DMG packaging and simplify macOS PiP ([cd64cdd](https://github.com/ditayler/Lapka/commit/cd64cdd3547df94be38a46883ae8c275fc81394b))
+* automate macOS release builds and show packaging progress ([3b2a40f](https://github.com/ditayler/Lapka/commit/3b2a40f4f47687b476dd957689fa870313dbfc50))
+* generate changelog during macOS releases ([5e2fe59](https://github.com/ditayler/Lapka/commit/5e2fe593c0101035b4e068da7e92e5604a7dbe15))
+* publish versioned macOS releases with semantic-release ([70b02c1](https://github.com/ditayler/Lapka/commit/70b02c14125d5fcdbf8aaf58af2189dc27aa6fe8))
+* publish versioned macOS releases with semantic-release ([0dbb591](https://github.com/ditayler/Lapka/commit/0dbb59158c7902549f32840d6cb386b93fa665fb))
+
 ## 1.3.0 — 17 October 2026
 
 - **The pause window.** On pause the frame shows the series: cover, year, kind, episode count,
