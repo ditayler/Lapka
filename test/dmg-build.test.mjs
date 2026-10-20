@@ -82,6 +82,10 @@ test('styled DMG installs an intact app and records its Finder layout', {
     assert.equal(await fsp.readlink(path.join(mount, 'Applications')), '/Applications');
     assert.ok((await fsp.stat(path.join(mount, '.DS_Store'))).size > 0);
     assert.ok((await fsp.stat(path.join(mount, '.background.tiff'))).size > 0);
+    const { stdout: dimensions } = await exec('/usr/bin/sips', ['-g', 'pixelWidth', '-g', 'pixelHeight',
+      path.join(mount, '.background.tiff')]);
+    assert.ok(Number(/pixelWidth: (\d+)/.exec(dimensions)?.[1]) >= 3840, 'background covers enlarged 4K Finder windows');
+    assert.ok(Number(/pixelHeight: (\d+)/.exec(dimensions)?.[1]) >= 2160, 'background covers enlarged 4K Finder windows');
     const python = path.resolve('.dev/build-cache/dmgbuild-1.6.5/bin/python3');
     await exec(python, ['-I', '-c', `
 import sys
@@ -92,6 +96,8 @@ with DSStore.open(sys.argv[1], 'r') as store:
     assert not store['.']['bwsp']['ShowToolbar']
     left, right = store['Lapka.app']['Iloc'], store['Applications']['Iloc']
     assert left[0] < right[0] and left[1] == right[1]
+    for name in ('.background.tiff', '.VolumeIcon.icns'):
+        assert store[name]['Iloc'][0] > 4096, 'support files stay outside the installer canvas'
 `, path.join(mount, '.DS_Store')]);
     const installed = path.join(dir, 'Applications/Lapka.app');
     await fsp.mkdir(path.dirname(installed));

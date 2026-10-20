@@ -104,6 +104,10 @@ window and Retina artwork. Its first build downloads pinned, hash-verified
 Python packaging tools into `.dev/build-cache/`; Python 3.9+ is supplied by the
 Xcode Command Line Tools. These tools are only needed to build the DMG.
 
+Finder uses a fixed picture background, so the dark canvas extends to
+4096 × 2304 points to cover enlarged windows. Support-file icons sit outside
+that area when Finder reveals hidden files; packaging preserves that preference.
+
 For a custom existing bundle or output folder:
 
 ```sh

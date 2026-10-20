@@ -5,7 +5,10 @@ let icon = NSImage(contentsOfFile: CommandLine.arguments[1])!
 let version = CommandLine.arguments[2]
 let architecture = CommandLine.arguments[3] == "arm64" ? "Apple Silicon" : "Intel"
 let output = URL(fileURLWithPath: CommandLine.arguments[4])
-let width = 720, height = 440
+// Finder does not stretch picture backgrounds when it inherits a larger window
+// or opens a tab. Extend the dark canvas through a 4K-sized window while keeping
+// the install controls in the initial 720 × 440 point viewport.
+let width = 4096, height = 2304
 func rect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> NSRect {
     NSRect(x: x, y: CGFloat(height) - y - h, width: w, height: h)
 }
@@ -26,8 +29,10 @@ for scale in [1, 2] {
     bitmap.size = NSSize(width: width, height: height)
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+    gray(0.045).setFill()
+    NSBezierPath(rect: NSRect(x: 0, y: 0, width: width, height: height)).fill()
     NSGradient(starting: gray(0.095), ending: gray(0.045))!.draw(
-        in: NSRect(x: 0, y: 0, width: width, height: height), angle: -90)
+        in: rect(0, 0, CGFloat(width), 440), angle: -90)
 
     icon.draw(in: rect(40, 34, 36, 36))
     text("Lapka", 88, 34, 28, gray(0.96), .semibold)
@@ -43,14 +48,14 @@ for scale in [1, 2] {
         // Finder uses dark filename text on picture backgrounds. Keep native
         // labels readable in light and dark system appearances.
         gray(0.78).setFill()
-        NSBezierPath(roundedRect: rect(x + 22, 298, 132, 26), xRadius: 13, yRadius: 13).fill()
+        NSBezierPath(roundedRect: rect(x + 22, 293, 132, 26), xRadius: 13, yRadius: 13).fill()
     }
     let arrow = NSBezierPath()
-    arrow.move(to: NSPoint(x: 333, y: 440 - 231))
-    arrow.line(to: NSPoint(x: 385, y: 440 - 231))
-    arrow.move(to: NSPoint(x: 374, y: 440 - 220))
-    arrow.line(to: NSPoint(x: 385, y: 440 - 231))
-    arrow.line(to: NSPoint(x: 374, y: 440 - 242))
+    arrow.move(to: NSPoint(x: 333, y: height - 231))
+    arrow.line(to: NSPoint(x: 385, y: height - 231))
+    arrow.move(to: NSPoint(x: 374, y: height - 220))
+    arrow.line(to: NSPoint(x: 385, y: height - 231))
+    arrow.line(to: NSPoint(x: 374, y: height - 242))
     arrow.lineWidth = 2
     arrow.lineCapStyle = .round
     arrow.lineJoinStyle = .round

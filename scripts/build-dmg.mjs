@@ -106,7 +106,11 @@ export async function build(options) {
         files: [copied], symlinks: { Applications: '/Applications' },
         icon, background: path.join(work, 'background.png'),
         window_rect: [[160, 160], [720, 440]], default_view: 'icon-view',
-        icon_locations: { 'Lapka.app': [200, 231], Applications: [520, 231] },
+        icon_locations: { 'Lapka.app': [200, 231], Applications: [520, 231],
+          // Show Hidden Files is a user's global preference. Respect it, but
+          // keep the image's support files out of the main installation area.
+          '.background.tiff': [4608, 100], '.VolumeIcon.icns': [4808, 100] },
+        scroll_position: [0, 0],
         // SetFile's hide-extension flag adds FinderInfo to the signed app.
         // Keep the bundle untouched so a copied installation still verifies.
         icon_size: 112, text_size: 14,
