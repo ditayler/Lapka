@@ -37,6 +37,17 @@ export const CASES = [
     players: ['alpha', 'beta'],
     dubs: { alpha: ['AniLibria', 'Dream Cast'], beta: ['AniLibria', 'AniDub', 'JAM'] },
     layout: { episodes: 'select', dubs: 'per-player', player: 'iframe-switch' },
+    /* the facts the page states of itself, in structured data and in labelled fields */
+    facts: { altTitles: ['Select', 'セレクト'], genres: ['Комедия', 'Приключения'], studio: 'Студия Селект', origin: 'Манга', age: '16+', mpaa: 'PG-13', episodesTotal: 12 },
+  },
+  {
+    id: 'subs',
+    title: 'Сериал Субтитры',
+    device: 'episodes as links; one dub; one embed with the stream in a script and two subtitle tracks, each named by its language',
+    episodes: 2,
+    players: ['beta'],
+    dubs: { beta: ['AniLibria'] },
+    layout: { episodes: 'links', dubs: 'page-tabs', player: 'iframe', subs: ['Русские', 'English'] },
   },
   {
     id: 'seasons',
@@ -46,6 +57,15 @@ export const CASES = [
     players: ['alpha'],
     dubs: { alpha: ['AniLibria'] },
     layout: { episodes: 'links', dubs: 'page-tabs', player: 'iframe', seasons: 2 },
+  },
+  {
+    id: 'qualities',
+    title: 'Сериал Качества',
+    device: 'episodes as links; one dub; the embed offers the same episode as two files, 720p and 480p, as <source> elements of one <video>',
+    episodes: 2,
+    players: ['alpha'],
+    dubs: { alpha: ['AniLibria'] },
+    layout: { episodes: 'links', dubs: 'page-tabs', player: 'iframe', qualities: [720, 480] },
   },
   {
     id: 'video',

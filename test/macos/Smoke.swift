@@ -98,6 +98,10 @@ struct NativeSmoke {
                 timer.invalidate()
                 if mode == "pip" { pipChecks(view: view); return }
                 if mode == "autohide" {
+                    // WebKit pauses a silent autoplay video when another app
+                    // covers its window. Keep this fixture visible during the
+                    // idle interval while the developer continues working.
+                    delegate.window?.level = .floating
                     waitCondition(view: view, condition: "(() => { const v=document.querySelector('#video'); return v.readyState>=2 && !v.seeking; })()") { autohideChecks(view: view) }
                     return
                 }
@@ -136,6 +140,13 @@ struct NativeSmoke {
         }
         let play = """
         (() => {
+          const v=document.querySelector('#video');
+          if (!window.__autohideEvents) {
+            window.__autohideEvents=[];
+            const pause=v.pause.bind(v);
+            v.pause=() => { window.__autohideEvents.push('pause called: '+new Error().stack); pause(); };
+            for (const event of ['play','pause','ended','emptied']) v.addEventListener(event, () => window.__autohideEvents.push(event+' at '+v.currentTime));
+          }
           window.__autohidePlayError=null;
           document.querySelector('#video').play().then(() => {
             document.querySelector('#deck').dispatchEvent(new Event('pointerleave'));
@@ -182,7 +193,7 @@ struct NativeSmoke {
     }
     static func waitCondition(view: WKWebView, condition: String, attempts: Int = 0, completion: @escaping () -> Void) {
         guard attempts < 60 else {
-            view.evaluateJavaScript("({stage:document.querySelector('#stage').className,paused:document.querySelector('#video').paused,playError:window.__autohidePlayError,menus:[...document.querySelectorAll('.menu.open')].map(m=>m.id)})") { value, _ in fail("condition timed out: \(condition); state=\(String(describing:value))") }
+            view.evaluateJavaScript("({stage:document.querySelector('#stage').className,paused:document.querySelector('#video').paused,playError:window.__autohidePlayError,events:window.__autohideEvents,menus:[...document.querySelectorAll('.menu.open')].map(m=>m.id)})") { value, _ in fail("condition timed out: \(condition); state=\(String(describing:value))") }
             return
         }
         view.evaluateJavaScript(condition) { value, _ in

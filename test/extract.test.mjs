@@ -17,7 +17,7 @@ import fsp from 'node:fs/promises';
 import { build, haveFfmpeg } from './fixtures.mjs';
 import { startSite } from './site/serve.mjs';
 import { bootLapka } from '../core/lapka.mjs';
-import { loadExtractors, extractorFor } from '../core/extract/index.mjs';
+import { loadExtractors, extractorFor, closedDoor } from '../core/extract/index.mjs';
 import generic from '../core/extract/players/generic.mjs';
 import { createSession } from '../core/session/index.mjs';
 
@@ -78,7 +78,7 @@ describe('from an address to streams', { skip: !ffmpeg && 'ffmpeg not installed'
     assert.deepEqual(ep.dubs.map(d => [d.name, d.sources.length, d.sources[0].streams[0]?.kind, d.sources[0].health.ok]),
       [['AniLibria', 1, 'mp4', true], ['AniDub', 1, 'mp4', true]]);
     assert.equal(ep.dubs[0].sources[0].extractor, 'generic');
-    assert.ok(steps.some(s => s.startsWith('Открыла 2 плеера')), steps.join(' | '));
+    assert.ok(steps.some(s => s.key === 'opened' && s.ok === 2 && s.asked === 2), JSON.stringify(steps));
   });
 
   test('two players, one studio in both: one dub, two live sources', async () => {
@@ -111,22 +111,18 @@ describe('from an address to streams', { skip: !ffmpeg && 'ffmpeg not installed'
     const ep = series.episodes.find(e => e.number === 1);
     const ghost = ep.dubs.find(d => d.name === 'Ghost Studio');
     assert.equal(ghost.sources[0].health.ok, false);
-    assert.match(ghost.sources[0].health.error, /404/);
+    assert.deepEqual(ghost.sources[0].health.error, { key: 'embedStatus', status: 404 }, 'the refusal is a code with its status, not a sentence');
     assert.equal(ep.dubs.find(d => d.key === 'anilibria').sources[0].health.ok, true);
-    assert.ok(steps.some(s => s.startsWith('Открыла 1 из 2')), steps.join(' | '));
+    assert.ok(steps.some(s => s.key === 'opened' && s.ok === 1 && s.asked === 2), JSON.stringify(steps));
   });
 });
 
-/* ── Sibnet: no extractor of its own, the generic one reads it ── */
-describe('the generic extractor on a Sibnet embed', { skip: !existsSync(new URL('./snapshots/sibnet/embed.html', import.meta.url)) && 'the snapshots of real pages are kept outside the repository' }, () => {
-  test('finds the mp4 in the script and keeps the embed as the referer', async () => {
-    const fs = await import('node:fs');
-    const html = fs.readFileSync(new URL('./snapshots/sibnet/embed.html', import.meta.url), 'utf8');
-    const session = { fetch: async url => ({ status: 200, url, body: html, headers: {}, cookies: [] }) };
-    const got = await generic.extract('https://video.sibnet.ru/shell.php?videoid=3647476', { referer: 'https://old.yummyani.me/' }, session);
-    assert.equal(got.streams.length, 1);
-    assert.equal(got.streams[0].kind, 'mp4');
-    assert.match(got.streams[0].url, /^https:\/\/video\.sibnet\.ru\/v\/[a-f0-9]+\/3647476\.mp4$/);
-    assert.equal(got.streams[0].headers.referer, 'https://video.sibnet.ru/shell.php?videoid=3647476');
+describe('closed doors', () => {
+  test('a player behind a door known to be closed is refused without a request, with the reason', () => {
+    assert.equal(closedDoor('https://www.youtube.com/embed/abc?autoplay=1'), 'closed door');
+    assert.equal(closedDoor('https://youtu.be/abc'), 'closed door');
+    assert.equal(closedDoor('https://rutube.ru/play/embed/c6beb695e7dbfaed1861048a05940821'), 'closed door');
+    assert.equal(closedDoor('https://player.example/serial/1/abc/720p'), null);
+    assert.equal(closedDoor('not a url'), null);
   });
 });

@@ -1,24 +1,45 @@
 /* ═══════════════════════════════════════════════════════════
    State: what the user did, remembered.
 
-   Where each episode was left, which dub the user chose for a series,
-   the settings. One JSON file, written whole and atomically, a little
-   after the last change rather than on every tick of the clock.
-   Keys are catalog identities, never paths.
+   Where each episode was left, which episodes were watched to the end,
+   which dub the user chose for a series, the settings, and the links
+   pasted, each with the title and the cover of the series it opened.
+   One JSON file, written whole and atomically, a little after the last
+   change rather than on every tick of the clock.
+   Keys are catalog identities, never paths; the history alone is keyed
+   by the link as it was pasted.
    ═══════════════════════════════════════════════════════════ */
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 export const STATE_V = 1;
 const POS_KEEP = 500;
+const HISTORY_KEEP = 100;
 
 export async function openState(own) {
   const file = path.join(own, 'state.json');
-  let data = { v: STATE_V, positions: {}, dubs: {}, settings: {}, saves: {} };
+  let data = { v: STATE_V, positions: {}, watched: {}, dubs: {}, settings: {}, saves: {}, history: {} };
   try {
     const got = JSON.parse(await fsp.readFile(file, 'utf8'));
-    if (got && got.v === STATE_V) data = { ...data, ...got };
+    if (got && got.v === STATE_V) data = { ...data, ...got, history: got.history || {} };
   } catch { /* first start */ }
+  /* A place is one per episode, whatever the dub it was watched in; until
+     1.1.3 it was kept per dub. Old keys "series/episode/dub" fold into
+     "series/episode", the newest of them winning. */
+  let folded = false;
+  /* one row of history per franchise: rows whose parts meet fold into the newest */
+  for (const h of Object.values(data.history).sort((a, b) => b.at - a.at)) {
+    if (!data.history[h.url]) continue;
+    const ids = new Set((h.parts || []).map(p => p.id));
+    for (const o of Object.values(data.history)) if (o.url !== h.url && (o.parts || []).some(p => ids.has(p.id))) { delete data.history[o.url]; folded = true; }
+  }
+  for (const [k, v] of Object.entries(data.positions)) {
+    const parts = k.split('/');
+    if (parts.length < 3) continue;
+    const nk = `${parts[0]}/${parts[1]}`;
+    if (!data.positions[nk] || (v.at || 0) > (data.positions[nk].at || 0)) data.positions[nk] = v;
+    delete data.positions[k]; folded = true;
+  }
 
   let timer = null, writing = null;
   const flush = async () => {
@@ -26,20 +47,29 @@ export async function openState(own) {
     await (writing = fsp.writeFile(file + '.part', JSON.stringify(data, null, 1)).then(() => fsp.rename(file + '.part', file)));
   };
   const soon = () => { if (!timer) timer = setTimeout(() => flush().catch(() => {}), 500); };
+  if (folded) soon();
 
-  const posKey = (seriesId, episode, dub) => `${seriesId}/${episode}/${dub}`;
+  const posKey = (seriesId, episode) => `${seriesId}/${episode}`;
 
   return {
     file,
     get: () => data,
-    position(seriesId, episode, dub) { return data.positions[posKey(seriesId, episode, dub)]?.t ?? null; },
-    setPosition(seriesId, episode, dub, seconds) {
-      const k = posKey(seriesId, episode, dub);
+    position(seriesId, episode) { return data.positions[posKey(seriesId, episode)]?.t ?? null; },
+    /* the duration goes along, so a row can show where the episode was left before it is ever opened again */
+    setPosition(seriesId, episode, seconds, duration = 0, dub = null) {
+      const k = posKey(seriesId, episode);
       if (seconds === null) delete data.positions[k];
-      else data.positions[k] = { t: Math.max(0, Number(seconds) || 0), at: Date.now() };
+      else data.positions[k] = { t: Math.max(0, Number(seconds) || 0), d: Math.max(0, Number(duration) || 0), at: Date.now(), ...(dub ? { dub: String(dub) } : {}) };
       /* the oldest are let go, so the file does not grow with every episode ever watched */
       const keys = Object.keys(data.positions);
       if (keys.length > POS_KEEP) for (const k of keys.sort((a, b) => data.positions[a].at - data.positions[b].at).slice(0, keys.length - POS_KEEP)) delete data.positions[k];
+      soon();
+    },
+    /* an episode watched to its end, whatever the dub; kept for good, unlike the positions */
+    watched(seriesId, episode) { return !!data.watched[`${seriesId}/${episode}`]; },
+    setWatched(seriesId, episode, on = true, dub = null) {
+      const k = `${seriesId}/${episode}`;
+      if (on) data.watched[k] = { at: Date.now(), ...(dub ? { dub: String(dub) } : {}) }; else delete data.watched[k];
       soon();
     },
     dub(seriesId) { return data.dubs[seriesId] || null; },
@@ -50,6 +80,70 @@ export async function openState(own) {
     setSave(key, rec) { data.saves[key] = { ...(data.saves[key] || {}), ...rec, at: Date.now() }; soon(); },
     clearSave(key) { delete data.saves[key]; soon(); },
     setSetting(k, v) { if (v === undefined) delete data.settings[k]; else data.settings[k] = v; soon(); },
+    /* The links pasted, oldest first: the link as typed, the series it
+       opened (its id, title, kind, year, season, episode count), the cover
+       kept as a file of Lapka's own, and when. Pasted again, a link moves
+       to the end with what it opened now. */
+    history() { return Object.values(data.history).sort((a, b) => a.at - b.at); },
+    /* where watching last stopped across the parts named: the newest of
+       the positions kept and the episodes watched to the end */
+    lastStop(ids) {
+      const set = new Set((ids || []).map(String));
+      let best = null;
+      for (const [k, v] of Object.entries(data.positions)) {
+        const [sid, ep] = k.split('/');
+        if (set.has(sid) && (!best || v.at > best.at)) best = { seriesId: sid, episode: Number(ep), t: v.t, d: v.d || 0, at: v.at, done: false, dub: v.dub || null };
+      }
+      for (const [k, v] of Object.entries(data.watched)) {
+        const [sid, ep] = k.split('/');
+        if (set.has(sid) && (!best || v.at > best.at)) best = { seriesId: sid, episode: Number(ep), t: 0, d: 0, at: v.at, done: true, dub: v.dub || null };
+      }
+      return best;
+    },
+    remember(rec) {
+      const url = String(rec.url || '').trim();
+      if (!url) return null;
+      /* each part with what a fuller row shows of it: its year, how many
+         episodes, one other name, its cover's file; what a part said of
+         itself before stays when it says nothing now */
+      const known = Object.values(data.history).flatMap(h => h.parts || []);
+      const part = p => {
+        const was = known.find(x => x.id === String(p.id)) || {};
+        return { id: String(p.id), ordinal: Number(p.ordinal) || null, title: p.title || was.title || '', season: Number(p.season) || null, kind: p.kind || was.kind || null, year: Number(p.year) || was.year || null, episodes: Number(p.episodes) || was.episodes || 0, dubs: Number(p.dubs) || was.dubs || 0, alt: p.alt ? String(p.alt).slice(0, 200) : was.alt || '', coverFile: p.coverFile || was.coverFile || null };
+      };
+      const parts = Array.isArray(rec.parts) && rec.parts.length ? rec.parts.map(part) : (rec.seriesId ? [part({ id: rec.seriesId, title: rec.title, kind: rec.kind, year: rec.year, episodes: rec.episodes, alt: (rec.altTitles || [])[0], coverFile: rec.coverFile })] : []);
+      /* A franchise is one row: a link whose parts meet those of a row
+         already kept (the first season pasted after the fifth, on the same
+         site) takes that row's place. A link pasted again keeps the cover it
+         had when none came this time. */
+      const ids = new Set(parts.map(p => p.id));
+      const same = Object.values(data.history).filter(h => h.url !== url && (h.parts || []).some(p => ids.has(p.id)));
+      for (const h of same) delete data.history[h.url];
+      const prev = data.history[url] || same.find(h => h.seriesId === rec.seriesId) || {};
+      /* the newest row is the last: its moment is past every row's, even two in one millisecond */
+      const at = Math.max(Date.now(), ...Object.values(data.history).map(h => (h.at || 0) + 1));
+      /* the facts the page stated and the other names, kept for a fuller row one day; absent, the ones kept before stay */
+      const facts = rec.facts && typeof rec.facts === 'object' ? rec.facts : prev.facts || null;
+      const altTitles = Array.isArray(rec.altTitles) && rec.altTitles.length ? rec.altTitles.map(String).slice(0, 6) : prev.altTitles || [];
+      const entry = { url, seriesId: rec.seriesId || null, title: rec.title || '', kind: rec.kind || null, year: rec.year || null, season: rec.season || null, episodes: Number(rec.episodes) || 0, cover: rec.cover || prev.cover || null, coverFile: rec.coverFile || prev.coverFile || null, parts, at, ...(facts ? { facts } : {}), ...(altTitles.length ? { altTitles } : {}) };
+      data.history[url] = entry;
+      const keys = Object.keys(data.history);
+      if (keys.length > HISTORY_KEEP) for (const k of keys.sort((a, b) => data.history[a].at - data.history[b].at).slice(0, keys.length - HISTORY_KEEP)) delete data.history[k];
+      soon();
+      return entry;
+    },
+    /* one link forgotten: the row goes, and the names of its cover files
+       (the row's, its parts') are given back to be removed; what was
+       watched stays, it is the series' own memory, not the link's */
+    forgetLink(url) {
+      const h = data.history[String(url || '').trim()];
+      if (!h) return null;
+      delete data.history[h.url]; soon();
+      return { coverFile: h.coverFile || null, files: [...new Set([h.coverFile, ...(h.parts || []).map(p => p.coverFile)].filter(Boolean))] };
+    },
+    /* what was noted about watching: positions, watched marks, dub choices, the links pasted. Settings and save records stay. */
+    notes() { return Object.keys(data.positions).length + Object.keys(data.watched).length + Object.keys(data.dubs).length + Object.keys(data.history).length; },
+    forget() { data.positions = {}; data.watched = {}; data.dubs = {}; data.history = {}; soon(); },
     flush,
     close: async () => { if (timer) await flush(); else if (writing) await writing; },
   };

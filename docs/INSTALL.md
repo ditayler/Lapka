@@ -57,6 +57,22 @@ then, in a new terminal, `nvm install --lts`.
 
 `node -v` again, to be sure.
 
+## The shortest way: npx
+
+With Node.js in place (step 1), Lapka starts with one command in the terminal,
+with no download and no project folder:
+
+```bash
+npx -y lapka
+```
+
+npx fetches Lapka (the package `@mythhand/lapka`, by its short name) into its
+own cache, starts it and opens it in the browser. The next start with the same
+command takes the new version, when there is one. To stop: Ctrl+C in that
+terminal, or the "Quit Lapka" button in the settings. Saved episodes go to a
+`Lapka` folder in your home folder until you choose another one in the settings.
+Steps 2–4 are not needed then; go on to step 5.
+
 ## Step 2. Download Lapka
 
 Without git: on https://github.com/MythHand/Lapka press the green **Code**
@@ -118,10 +134,12 @@ the terminal or simply close the terminal window.
 
 ## Step 5. The folder for files
 
-In the player: the gear at the top right → "Lapka folder" → "Choose another
+In the player: the paw at the top right → "Lapka folder" → "Choose another
 folder". The system's folder dialog opens. Saved episodes and Lapka's own files
-go there. If you never choose a folder, the files pile up in `.dev/home` inside
-the Lapka folder.
+go there. The choice itself is kept where the system keeps a program's settings
+(`~/Library/Application Support/Lapka` on macOS, `%APPDATA%\Lapka` on Windows,
+`~/.config/lapka` on Linux), so it is one and the same whatever way Lapka is
+started.
 
 On Linux the system dialog needs the `zenity` program; without it the path can
 be typed by hand through the "type a path instead" link in the same menu.
@@ -160,9 +178,9 @@ sudo apt install ffmpeg
 Lapka runs as a small server on your machine; it does not stop by itself when
 the browser tab is closed. Three ways to stop it:
 
-- **The button.** In the player: the gear → the bottom of the "Where things are
-  kept" column → **Quit Lapka**, twice (the first click asks). The tab says
-  Lapka has quit and can be closed.
+- **The button.** In the player: the paw → the first column, under the state →
+  **Quit Lapka**, twice (the first click asks). The tab says Lapka has quit and
+  can be closed.
 - **The launcher's twin.** Double-click `stop.command` (macOS) or `stop.bat`
   (Windows) in the same folder; on Linux `./stop.sh` in a terminal. To start
   again, the same with `start.command` / `start.bat` / `./start.sh`. In a
@@ -176,7 +194,13 @@ disk and come back at the next start.
 
 ## Updating
 
-The short way: double-click `update.command` (macOS) or `update.bat`
+From Lapka itself: settings → the "Version v…" row → "Check for an update".
+When there is a newer one, an "Update to v…" button appears: Lapka fetches the
+new version, installs what it needs, starts itself again and asks to reload the
+page. It works for a folder downloaded as a ZIP too: the release archive is
+taken from GitHub then. The check goes online only when the button is pressed.
+
+The short way outside Lapka: double-click `update.command` (macOS) or `update.bat`
 (Windows), or run `./update.sh` on Linux. If the folder came by `git clone`,
 it pulls the newest version, installs what changed and starts Lapka again if
 it was running. If the folder came as a ZIP, it says where the new ZIP is.
@@ -189,18 +213,21 @@ folder, replacing the files.
 Either way the settings and the chosen Lapka folder stay: they live outside
 the program's files.
 
+
 ## If something is off
 
 **`npm` or `node` not found.** Node.js is not installed, or the terminal was
 opened before the installation. Close the terminal, open it again, `node -v`.
 
-**Port 8800 is taken.** Start on another one:
+**Port 8800 is taken.** Lapka says so itself. When the port is held by another
+Lapka, that one is opened in the browser: it is the same player, started another
+way. When it is held by some other program, start Lapka on another port:
 
 ```bash
 PORT=8801 npm start
 ```
 
-In Windows PowerShell: `$env:PORT=8801; npm start`.
+In Windows PowerShell: `$env:PORT=8801; npm start`. With npx: `PORT=8801 npx -y lapka`.
 
 **The page does not open.** Make sure the terminal with `npm start` is open
 and shows no red errors; the address is exactly `http://127.0.0.1:8800`, not
@@ -208,6 +235,11 @@ and shows no red errors; the address is exactly `http://127.0.0.1:8800`, not
 
 **Saving does not work, playing does.** No ffmpeg, or it is not in PATH. Check
 `ffmpeg -version` in a new terminal window.
+
+**`Error: spawn ffmpeg ENOENT`.** The same: ffmpeg was not found. Watching works
+without it, saving does not. If it came from `npm run dev`: that is the
+developers' command, which also starts a test site whose clips are made with
+ffmpeg; to watch, use `npm start` or the launcher.
 
 **A site did not open.** Not every site is built the same way; the list of
 tested ones is in the [README](../README.md). Sites with DRM, and sites that

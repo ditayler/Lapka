@@ -128,10 +128,10 @@ const pulseEl = $('#pulse'), pulseIcon = $('#pulseIcon'), flashEl = $('#flash');
 const notice = $('#notice'), noticeText = $('#noticeText');
 const endCard = $('#endCard'), endMeta = $('#endMeta');
 const emptyEl = $('#empty'), modeHint = $('#modeHint');
-const prep = $('#prep'), prepName = $('#prepName'), prepTrack = $('#prepTrack');
+const prep = $('#prep'), prepName = $('#prepName'), prepTrack = $('#prepTrack'), prepHead = $('#prepHead');
 const prepSteps = $('#prepSteps'), prepCmd = $('#prepCmd');
 const deck = $('#deck'), seek = $('#seek'), seekFill = $('#seekFill');
-const seekBuffer = $('#seekBuffer'), seekKnob = $('#seekKnob'), seekTip = $('#seekTip');
+const seekBuffer = $('#seekBuffer'), seekDisk = $('#seekDisk'), seekKnob = $('#seekKnob'), seekTip = $('#seekTip');
 const tCur = $('#tCur'), tDur = $('#tDur');
 const btnPlay = $('#btnPlay'), playIcon = $('#playIcon');
 const btnMute = $('#btnMute'), volIcon = $('#volIcon'), volBar = $('#volBar'), volFill = $('#volFill');
@@ -156,6 +156,7 @@ const queueEl = $('#queue'), btnLocate = $('#btnLocate');
 const linkForm = $('#linkForm'), linkInput = $('#linkInput');
 const skipEl = $('#skip'), btnSkip = $('#btnSkip'), btnSkipHide = $('#btnSkipHide');
 const queueLinkForm = $('#queueLinkForm'), queueLinkInput = $('#queueLinkInput');
+const histPop = $('#histPop'), btnOverview = $('#btnOverview'), overview = $('#overview');
 const MENUS = [audioMenu, pipMenu, rateMenu, subsMenu, qualityMenu, gearMenu];
 
 /* ── fitting into narrow places ───────────────────────────────
@@ -316,8 +317,14 @@ const SETTINGS = [
     opts: [['on', 'common.on'], ['off', 'common.off']] },
   { key: 'hideUi', def: 'off', label: 'set.hideUi',
     opts: [['on', 'common.on'], ['off', 'common.off']] },
+  { key: 'autoSkip', def: 'off', label: 'set.autoSkip',
+    opts: [['on', 'common.on'], ['off', 'common.off']] },
+  { key: 'pauseInfo', def: 'on', label: 'set.pauseInfo',
+    opts: [['on', 'common.on'], ['off', 'common.off']] },
   { key: 'font', def: 'fixel', label: 'set.font',
     opts: [['fixel', 'set.font.fixel'], ['inter', 'set.font.inter']] },
+  { key: 'histLinks', def: 'on', label: 'set.histLinks',
+    opts: [['on', 'common.on'], ['off', 'common.off']] },
 ];
 const SETTINGS_V = '6';   // the defaults changed, so what was saved is dropped
 
@@ -393,37 +400,66 @@ const POS_MIN = 30;        // before the thirtieth second there is nowhere to re
 const POS_TAIL = 60;       // and not to the very end either: the episode is finished
 
 /* Where an episode was left is kept on the server, keyed by the
-   series, the episode and the dub: nothing here is a path. The copy
-   in state.positions is what the rows are painted from. */
-const posKey = it => {
-  const dub = it.dub ? it.dub.key : state.dubKey;
-  return it && it.seriesId && dub ? `${it.seriesId}/${it.number}/${dub}` : null;
-};
+   series and the episode, whatever the dub it was watched in: a place
+   is one, and nothing here is a path. The copy in state.positions is
+   what the rows are painted from. */
+const posKey = it => it && it.seriesId ? `${it.seriesId}/${it.number}` : null;
+/* The item whose media the video holds. A position belongs to it and
+   to nothing else: the row chosen runs ahead of the video while a start
+   is on, and the video's time is nobody's from the moment the media
+   before is let go until the next one has its metadata.
+
+   The row is painted on every tick, so its bar keeps step with the
+   player's; the server is told every few seconds and on a stop. */
+let loaded = null;
 const posTimers = {};
-function markPos(it, sec) {
+function markPos(it, sec, send = true) {
   const k = posKey(it);
-  if (!k || !isFinite(sec)) return;
+  if (!k || it !== loaded || !isFinite(sec)) return;
   const d = duration();
   const gone = sec < POS_MIN || (d && sec > d - POS_TAIL);
-  if (gone) delete state.positions[k]; else state.positions[k] = Math.round(sec);
-  clearTimeout(posTimers[k]);
-  const [series, episode, dub] = k.split('/');
-  posTimers[k] = setTimeout(() => post(`/api/state/position?series=${series}&episode=${episode}&dub=${encodeURIComponent(dub)}${gone ? '' : '&t=' + Math.round(sec)}`).catch(() => {}), 800);
+  if (gone) delete state.positions[k]; else state.positions[k] = { t: Math.round(sec), d: Math.round(d) || 0 };
+  if (d > POS_TAIL && sec > d - POS_TAIL) markWatched(it);   // the last minute: the episode is finished
+  if (send) {
+    clearTimeout(posTimers[k]);
+    const [series, episode] = k.split('/');
+    const path = `/api/state/position?series=${series}&episode=${episode}${gone ? '' : '&t=' + Math.round(sec) + '&d=' + (Math.round(d) || 0) + (it.dub ? '&dubName=' + encodeURIComponent(it.dub.name) : '')}`;
+    /* at once when the page is leaving (a timer would never fire), with the request kept alive past the page; else a moment later, the ticks of one second folded into one request */
+    if (send === 'now') fetch(path, { method: 'POST', headers: { 'x-lapka': '1' }, keepalive: true }).catch(() => {});
+    else posTimers[k] = setTimeout(() => post(path).catch(() => {}), 800);
+  }
   for (const li of queueList.children) {
     const x = byId(li.dataset.id);
     if (x === it) paintPos(li, x);
   }
 }
 
+/* An episode watched to its end is remembered by the series and the
+   number, whatever the dub, and for good: watching it again does not
+   take the mark away. */
+const watchKey = it => it && it.seriesId ? `${it.seriesId}/${it.number}` : null;
+function markWatched(it) {
+  const k = watchKey(it);
+  if (!k || state.watched[k]) return;
+  state.watched[k] = true;
+  const [series, episode] = k.split('/');
+  post(`/api/state/watched?series=${series}&episode=${episode}${it.dub ? '&dubName=' + encodeURIComponent(it.dub.name) : ''}`).catch(() => {});
+  for (const li of queueList.children) if (byId(li.dataset.id) === it) paintPos(li, it);
+}
+
 /* Where watching stopped, drawn as a bar on the episode's frame, in the
-   rows and in the tiles alike. Only what the player would return to is
-   drawn: the first half minute and the last minute are not kept, so a
-   finished episode has no bar. */
+   rows and in the tiles alike, from the first paint: the duration was
+   written down with the position, so the row needs nothing from the
+   media. Only what the player would return to is drawn: the first half
+   minute and the last minute are not kept. A watched episode keeps a
+   full bar and a veiled frame; left in the middle again, its bar shows
+   the middle. */
 function paintPos(li, it) {
   const k = posKey(it);
-  const at = k ? state.positions[k] : null, d = it.dur;
-  const f = at && d ? Math.min(1, at / d) : 0;
+  const p = k ? state.positions[k] : null, d = it.dur || (p && p.d);
+  const f = p && d ? Math.min(1, p.t / d) : 0;
   li.classList.toggle('has-pos', f > 0);
+  li.classList.toggle('is-watched', !!state.watched[watchKey(it)]);
   li.style.setProperty('--pos', f.toFixed(4));
 }
 
@@ -461,8 +497,9 @@ const state = {
   seasons: [],       // every series of its franchise that was opened, in viewing order: [{ series, entry }]
   dubKey: null,      // the dub chosen, carried to every episode and every season
   quality: strFromStore('lapka.quality', 'auto'),   // '1080p', '720p', … or 'auto' for the best there is
-  saved: new Map(),  // 'seriesId/number' → what the library holds of it: [{ dub, size, path }]
-  positions: {},     // series/episode/dub → seconds, mirrored from the server
+  saved: new Map(),  // 'seriesId/number' → what the library holds of it: [{ dub, dubKey, quality, size, path }]
+  positions: {},     // series/episode → { t: seconds, d: duration }, mirrored from the server
+  watched: {},       // series/episode → true, mirrored from the server
   remote: {},        // the server's state as it was at boot
   loop: 'off', queueOpen: true,
   autoplay: strFromStore('lapka.autoplay', '1') !== '0',
@@ -511,9 +548,9 @@ function fmtLong(s) {
   const p = n => String(n).padStart(2, '0');
   return `${Math.floor(s / 3600)}:${p(Math.floor(s % 3600 / 60))}:${p(s % 60)}`;
 }
-const fmtSize = b => b >= 1073741824
-  ? t('units.gb', { n: (b / 1073741824).toFixed(1) })
-  : t('units.mb', { n: Math.round(b / 1048576) });
+const fmtSize = b => b >= 1073741824 ? t('units.gb', { n: (b / 1073741824).toFixed(1) })
+                   : b >= 1048576 ? t('units.mb', { n: Math.round(b / 1048576) })
+                   : t('units.kb', { n: Math.round(b / 1024) });
 
 let toastT;
 function toast(msg) {
@@ -602,8 +639,19 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function api(path, opts) {
   const r = await fetch(path, opts);
   const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(d.error || String(r.status));
+  if (!r.ok) throw Object.assign(new Error(d.error || String(r.status)), { reason: d.reason || null });   // a reason, when given, is a code for the page to word
   return d;
+}
+/* the look of a page told as it goes: every step to onStep, the answer at the end */
+function lookLive(url, onStep) {
+  return new Promise((resolve, reject) => {
+    const es = new EventSource('/api/look/live?url=' + encodeURIComponent(url));
+    const close = () => es.close();
+    es.addEventListener('step', e => { try { onStep(JSON.parse(e.data)); } catch (_) {} });
+    es.addEventListener('done', e => { close(); resolve(JSON.parse(e.data)); });
+    es.addEventListener('fail', e => { close(); let d = {}; try { d = JSON.parse(e.data); } catch (_) {} reject(new Error(d.error || 'look failed')); });
+    es.onerror = () => { close(); reject(new Error(t('set.cacheFail'))); };
+  });
 }
 const post = path => api(path, { method: 'POST', headers: { 'x-lapka': '1' } });
 const airplay = new window.LapkaAirplay({
@@ -632,6 +680,8 @@ let hls = null;
 function stopPlayback() {
   sourceGeneration++;
   airplay.clear();
+  if (loaded) markPos(loaded, video.currentTime);   // where it was left
+  loaded = null;
   if (hls) { hls.destroy(); hls = null; }
   if (!video.getAttribute('src')) return;
   video.pause();
@@ -644,18 +694,105 @@ function stopPlayback() {
    answers. */
 function showProgress(it, key) {
   closeMenus();
+  prep.classList.remove('prep--link');
+  prepHead.textContent = t('prep.head');
   prepName.textContent = it.name;
+  prepName.classList.remove('prep__name--url');
   prepTrack.textContent = state.series ? state.series.title : '';
   prepSteps.replaceChildren();
+  prepCmd.replaceChildren();
   const li = document.createElement('li');
   li.className = 'step step--active';
   li.innerHTML = '<span class="step__mark"></span><span class="step__text"></span><span class="step__aux"></span>';
   li.querySelector('.step__text').textContent = t(key);
   prepSteps.append(li);
-  prepCmd.textContent = '';
   prep.classList.add('show');
   state.busy = true;
   paintFavicon();
+}
+
+/* The wait for a link, composed whole before anything is known, so it
+   holds its shape while the work goes on: the address on one line, the
+   three phases there are (the page, its players, the parts of the
+   franchise), each waiting, working or done, and under them a log of
+   fixed height where what is being done arrives line by line, the
+   newest at the bottom like a terminal. */
+const LINK_PHASES = ['page', 'players', 'parts'];
+function showLinkWait(url) {
+  closeMenus();
+  prep.classList.add('prep--link');
+  prepHead.textContent = t('prep.link');
+  prepName.textContent = url;
+  prepName.classList.add('prep__name--url');
+  prepTrack.textContent = '';
+  prepSteps.replaceChildren();
+  for (const phase of LINK_PHASES) {
+    const li = document.createElement('li');
+    li.className = 'step step--wait';
+    li.dataset.phase = phase;
+    li.innerHTML = '<span class="step__mark"></span><span class="step__text"></span><span class="step__aux"></span>';
+    li.querySelector('.step__text').textContent = t('prep.' + phase);
+    prepSteps.append(li);
+  }
+  prepCmd.replaceChildren();
+  prep.classList.add('show');
+  state.busy = true;
+  paintFavicon();
+}
+/* a phase: waiting, working (with what is known of its progress), done, or passed over ("—") */
+function prepPhase(phase, mode, aux = '') {
+  const li = prepSteps.querySelector(`[data-phase="${phase}"]`);
+  if (!li) return;
+  li.className = 'step step--' + mode;
+  li.querySelector('.step__mark').textContent = mode === 'done' ? '✓' : '';
+  li.querySelector('.step__aux').textContent = mode === 'skip' ? '—' : aux;
+}
+/* a step from the server: a phase change, or a line for the log */
+function prepStep(step) {
+  if (step && typeof step === 'object' && step.phase) {
+    if (step.phase === 'players') prepPhase('page', 'done');
+    prepPhase(step.phase, 'active', step.n ? `0 / ${step.n}` : '');
+    return;
+  }
+  prepLog(stepText(step), detailOf(step));
+}
+/* The server says what it does as a key with its parts, never in words
+   of one language: the words are the page's, in the language chosen
+   here. A reason a player gave is worded when it is one Lapka knows,
+   else passed on as the player reader said it. A plain string passes
+   as it is. */
+function stepText(step) {
+  if (!step || typeof step !== 'object') return String(step ?? '');
+  const v = { ...step };
+  if (v.key === 'opened') return t(v.ok === v.asked ? 'log.openedAll' : 'log.openedSome', { n: v.asked, ok: v.ok }) + (v.same ? t('log.same', { n: v.same }) : '');
+  if (v.key === 'playerUnfolded') { v.episodes = t('log.nEpisodes', { n: v.episodes }); v.dubs = t('log.nDubs', { n: v.dubs }); }
+  if (v.why) v.why = whyText(v.why);
+  return t('log.' + v.key, v);
+}
+/* why something refused, in words: a code word, or a reason { key, …parts }
+   from the server; a reason no key is known for, or one that keeps the
+   machine's own text, is named as unforeseen, and its text goes separately */
+const WHY = { embedStatus: 'why.embedStatus', playerStatus: 'why.playerStatus', siteStatus: 'why.siteStatus', pageStatus: 'why.pageStatus', emptyEmbed: 'why.emptyEmbed', noLinks: 'why.noLinks', noSuchEpisode: 'why.noSuchEpisode', noPlayerAddress: 'why.noPlayerAddress', noFragment: 'why.noFragment', noEpisode: 'why.noEpisode', noStreams: 'why.noStreams', playbackFailed: 'why.playbackFailed', network: 'why.network', disk: 'why.disk', access: 'why.access', other: 'why.other' };
+function whyText(error) {
+  if (!error) return '';
+  if (typeof error === 'string') {
+    if (error === 'no extractor') return t('log.noExtractor');
+    if (error === 'closed door') return t('log.closedDoor');
+    return error;
+  }
+  return t(WHY[error.key] || 'why.other', { status: error.status ?? '' });
+}
+/* the machine's own text behind an unforeseen reason, to stand apart from the words */
+const detailOf = step => step && typeof step === 'object' && step.why && typeof step.why === 'object' && step.why.key === 'other' ? String(step.why.detail || '') : '';
+const PREP_LINES = 10;
+function prepLog(text, detail = '') {
+  const line = document.createElement('div');
+  line.className = 'cmd__line';
+  line.textContent = text;
+  /* the machine's own word, when there is one: after the words, quieter, seen for what it is */
+  if (detail) { const d = document.createElement('span'); d.className = 'cmd__detail'; d.textContent = ' ' + detail; line.append(d); }
+  prepCmd.append(line);
+  while (prepCmd.children.length > PREP_LINES) prepCmd.firstElementChild.remove();
 }
 function hideProgress() {
   prep.classList.remove('show');
@@ -707,9 +844,41 @@ const BANNER = `██         ▄████▄   ██████▄   █�
 ███████   ██    ██  ██        ██   ▀█▄  ██    ██`;
 const bannerEl = $('#banner');
 if (bannerEl) bannerEl.textContent = BANNER;
+/* A frame of the seal as rectangles, for the places that cannot hold
+   text: the favicon and the settings button. A cell is a square of
+   two half-blocks; the paw is 18 cells wide and 7 tall, centred in a
+   32-unit box. */
+const stillPaw = matchMedia('(prefers-reduced-motion: reduce)');
+function pawPath(frame, box = 32) {
+  const rows = frame.split('\n'), cols = Math.max(...rows.map(r => r.length));
+  const u = box / (cols + 5), x0 = (box - cols * u) / 2, y0 = (box - rows.length * 2 * u) / 2;
+  const f = n => n.toFixed(2);
+  let d = '';
+  rows.forEach((row, r) => [...row].forEach((c, k) => {
+    if (c === ' ') return;
+    const x = x0 + k * u, y = y0 + r * 2 * u;
+    if (c === '█') d += `M${f(x)} ${f(y)}h${f(u)}v${f(2 * u)}h-${f(u)}z `;
+    else if (c === '▄') d += `M${f(x)} ${f(y + u)}h${f(u)}v${f(u)}h-${f(u)}z `;
+    else if (c === '▀') d += `M${f(x)} ${f(y)}h${f(u)}v${f(u)}h-${f(u)}z `;
+  }));
+  return d.trim();
+}
+const PAW_PATHS = PAW_FRAMES.map(f => pawPath(f));
+const PAW_ORDER = [...PAW_FRAMES.keys(), ...[...PAW_FRAMES.keys()].reverse().slice(1)];
+/* the settings button presses like the seal: through the frames and back, once */
+const pawIcon = btnGear.querySelector('.ico-paw path');
+if (pawIcon) pawIcon.setAttribute('d', PAW_PATHS[0]);
+let pawPressT = null;
+function pressGearPaw() {
+  if (!pawIcon || stillPaw.matches) return;
+  clearTimeout(pawPressT);
+  let i = 0;
+  const tick = () => { pawIcon.setAttribute('d', PAW_PATHS[PAW_ORDER[i]]); if (++i < PAW_ORDER.length) pawPressT = setTimeout(tick, i === PAW_FRAMES.length ? 260 : 90); };
+  tick();
+}
+
 /* every paw on the page (the mark, the queue's about) presses together */
 const paws = () => [...document.querySelectorAll('.paw')].filter(el => el.offsetParent !== null);
-const stillPaw = matchMedia('(prefers-reduced-motion: reduce)');
 function pressPaws() {
   const els = paws();
   if (stillPaw.matches || !els.length) return;
@@ -785,23 +954,30 @@ const seasonOf = it => state.seasons.find(s => s.series.id === it.seriesId) || n
    its page, so what each opened part names is gathered too, round
    after round, until nothing new comes. One that fails is left out
    and said so. */
-async function openSeasons(main) {
-  const norm = u => String(u || '').replace(/[#?].*$/, '').replace(/\/+$/, '');
+async function openSeasons(main, { onStart = () => {}, onPart = () => {} } = {}) {
+  /* an address, and the season it names when a page holds every season in one player: "…/show.html?season=3" */
+  const norm = u => { try { const x = new URL(u); const s = x.searchParams.get('season'); return x.origin + x.pathname.replace(/\/+$/, '') + (s ? '?season=' + s : ''); } catch { return String(u || '').replace(/[#?].*$/, '').replace(/\/+$/, ''); } };
   const me = norm(main.sourceUrl);
   const known = new Map();   // url → { entry, series }
-  const add = e => { const k = norm(e.url); if (!k || known.has(k)) return; known.set(k, { entry: { ...e, self: k === me }, series: k === me ? main : null }); };
+  /* the series already opened at this address in this season: the page itself, seen from another part with its season spelled out */
+  const opened = k => [...known.values()].find(x => x.series && norm(x.series.sourceUrl).replace(/\?season=\d+$/, '') === k.replace(/\?season=\d+$/, '') && (norm(x.series.sourceUrl) === k || (x.series.season && k.endsWith('?season=' + x.series.season))));
+  const add = e => { const k = norm(e.url); if (!k || known.has(k) || opened(k)) return; known.set(k, { entry: { ...e, self: k === me }, series: k === me ? main : null }); };
   for (const e of main.franchise || []) add(e);
   if (known.size < 2) return [{ series: main, entry: (main.franchise || []).find(e => e.self) || null }];
-  toast(t('toast.seasons', { n: known.size }));
+  onStart(known.size);                 // the phase line says how many; no toast over it
+  let done = 0;
   for (let round = 0; round < 12; round++) {   // a long chain of neighbours takes a round per link
     const todo = [...known.values()].filter(x => !x.series && !x.failed);
     if (!todo.length) break;
-    const got = await Promise.allSettled(todo.map(x => api('/api/look?url=' + encodeURIComponent(x.entry.url))));
-    todo.forEach((x, i) => {
-      const r = got[i];
-      if (r.status === 'fulfilled' && r.value && r.value.series.episodes.length) { x.series = r.value.series; for (const e of r.value.series.franchise || []) add(e); }
-      else { x.failed = true; toast(t('toast.seasonFail', { title: x.entry.title || x.entry.url })); }
-    });
+    /* each part is told as it comes, not when the round is over */
+    const got = await Promise.allSettled(todo.map(x => api('/api/look?url=' + encodeURIComponent(x.entry.url)).then(r => {
+      const ok = r && r.series.episodes.length > 0;
+      if (ok) { x.series = r.series; for (const e of r.series.franchise || []) add(e); }
+      else x.failed = true;
+      onPart({ title: x.entry.title || (ok ? r.series.title : x.entry.url), episodes: ok ? r.series.episodes.length : 0, ok, done: ++done, total: known.size });
+      return r;
+    }, e => { x.failed = true; onPart({ title: x.entry.title || x.entry.url, episodes: 0, ok: false, done: ++done, total: known.size }); throw e; })));
+    todo.forEach((x, i) => { if (got[i].status !== 'fulfilled' || x.failed) toast(t('toast.seasonFail', { title: x.entry.title || x.entry.url })); });
   }
   /* one part per series: an episode's address and its series' address name the same series */
   const seen = new Set();
@@ -811,17 +987,26 @@ async function openSeasons(main) {
 async function openLink(url, { autoplay = true, at = null, quiet = false } = {}) {
   url = String(url || '').trim();
   if (!/^https?:\/\//i.test(url)) { toast(t('toast.badLink')); return false; }
-  showProgress({ name: url }, 'prep.page');
+  video.pause();                       // a new link is a new intent: what plays stops at once, the wait is shown over it
+  showLinkWait(url);
   let got;
-  try { got = await api('/api/look?url=' + encodeURIComponent(url)); }
+  let players = 0;
+  try { got = await lookLive(url, step => { if (step && step.phase === 'players') players = step.n; prepStep(step); }); }
   catch (e) { hideProgress(); toast(t('toast.lookFail', { why: e.message })); return false; }
-  hideProgress();
-  if (!got.series.episodes.length) { toast(t('toast.noEpisodes')); return false; }
+  if (!got.series.episodes.length) { hideProgress(); toast(t('toast.noEpisodes')); return false; }
+  prepPhase('page', 'done');
+  prepPhase('players', players ? 'done' : 'skip', players ? String(players) : '');
 
   stopPlayback(); playToken++;
   state.series = got.series;
   state.current = null;
-  state.seasons = await openSeasons(got.series);
+  let parts = 0;
+  state.seasons = await openSeasons(got.series, {
+    onStart: n => { parts = n; prepPhase('parts', 'active', `0 / ${n}`); },
+    onPart: p => { prepPhase('parts', 'active', `${p.done} / ${p.total}`); prepLog(p.ok ? t('prep.part', { title: p.title, n: p.episodes }) : t('prep.partFail', { title: p.title })); },
+  });
+  prepPhase('parts', parts ? 'done' : 'skip', parts ? String(parts) : '');
+  hideProgress();
   state.list = [];
   for (const { series } of state.seasons) {
     for (const ep of series.episodes) {
@@ -830,26 +1015,470 @@ async function openLink(url, { autoplay = true, at = null, quiet = false } = {})
       state.list.push(it);
     }
   }
-  state.dubKey = (state.remote.dubs || {})[got.series.id] || null;
+  /* the dub is the franchise's: the one noted for the part to start in, else the part pasted, else any part */
+  state.dubKey = franchiseDub([at && at.seriesId, got.series.id, ...state.seasons.map(s => s.series.id)]);
   linkInput.value = '';
   render(); paintTitle();
   loadLibrary(); watchSaves();
-  if (!quiet) toast(t('toast.opened', { n: state.list.length }));
+  if (!quiet) { toast(t('toast.opened', { n: state.list.length })); rememberLink(url, got.series); }
 
   /* the episode to start with: the one asked for, the one the link pointed at, or the first of the linked series */
   const wantedNumber = at && at.number != null ? at.number : at != null && typeof at !== 'object' ? at : got.start ? got.start.episode : null;
   const wantedSeries = at && at.seriesId ? at.seriesId : got.series.id;
+  /* a session restored and its episode not in the list: the episode last watched, by the server's memory of places */
+  const lastPlace = () => state.list.filter(i => state.positions[posKey(i)]).sort((a, b) => (state.positions[posKey(b)].at || 0) - (state.positions[posKey(a)].at || 0))[0] || null;
   const first = state.list.find(i => i.seriesId === wantedSeries && i.number === wantedNumber)
+    || (at && typeof at === 'object' ? lastPlace() : null)
     || state.list.find(i => i.seriesId === got.series.id) || state.list[0];
   if (autoplay) playItem(first);
   else {
-    /* the series is back but not started: the stage shows the episode it stopped on, not the start screen */
+    /* the series is back but not started: the stage shows the episode it stopped on, not the start screen,
+       and the queue stands at it, once the rows have their places */
     state.current = first;
     emptyEl.classList.add('hide'); stage.classList.remove('is-empty');
     paintTitle(); paintActive(); syncStatus();
+    requestAnimationFrame(() => requestAnimationFrame(revealCurrent));
+    restoredIdle = true; setTimeout(paintPauseInfo, 400);   // the same pause as any: the facts show until play is pressed
   }
   return true;
 }
+
+/* ── the links pasted ─────────────────────────────────────────
+   Every link a person pastes is written down on the server with what
+   it opened: the series' title, its cover kept as a file, kind, year,
+   season, how many episodes. A session restored on reload is not a
+   paste and is not written. The list stands beside the history button
+   in the queue's footer: as tall as the window allows, the newest at
+   the bottom, nearest the button; a row opens its link again. */
+/* the dub noted for the first of these parts that has one */
+function franchiseDub(ids) {
+  const dubs = state.remote.dubs || {};
+  for (const id of ids) if (id && dubs[id]) return dubs[id];
+  return null;
+}
+function rememberLink(url, series) {
+  const q = new URLSearchParams({ url, series: series.id, title: series.title || '', episodes: String(series.episodes.length) });
+  if (series.cover) q.set('cover', series.cover);
+  if (series.kind) q.set('kind', series.kind);
+  if (series.year) q.set('year', String(series.year));
+  if (series.season) q.set('season', String(series.season));
+  /* the parts the link opened: where watching stops is looked for across them */
+  q.set('parts', JSON.stringify(state.seasons.map(s => ({ id: s.series.id, ordinal: s.ordinal || null, title: s.series.title || '', season: s.series.season || null, kind: s.series.kind || null, year: s.series.year || null, episodes: s.series.episodes.length, dubs: new Set(s.series.episodes.flatMap(e => (e.dubs || []).map(d => d.name || d.key))).size, alt: otherName(s.series), cover: s.series.cover || null }))));
+  /* the facts the page stated of the series and its other names, for a fuller row one day */
+  if (series.facts && Object.keys(series.facts).length) q.set('facts', JSON.stringify(series.facts));
+  if (series.altTitles && series.altTitles.length) q.set('altTitles', JSON.stringify(series.altTitles.slice(0, 6)));
+  post('/api/history?' + q).then(() => { if (!histPop.hidden) loadHistory(); }).catch(() => {});
+}
+let histList = [];
+let histQuery = '';
+async function loadHistory() {
+  try { histList = (await api('/api/history')).history || []; } catch (_) { histList = []; }
+  if (!histPop.hidden) paintHistoryList();
+}
+/* when a link was last pasted: today and yesterday by name, else the day
+   and the month; a year other than this one is named too */
+function whenWords(at) {
+  const d = new Date(at), now = new Date();
+  const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const gone = Math.round((day(now) - day(d)) / 86400000);
+  if (gone === 0) return t('hist.today');
+  if (gone === 1) return t('hist.yesterday');
+  try { return d.toLocaleDateString(document.documentElement.lang || undefined, { day: 'numeric', month: 'short', ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) }); } catch (_) { return ''; }
+}
+/* The frame, once per opening, of one tall height: on the left the title
+   with how many links the history holds, whatever is searched, and under
+   it the rows, the newest at the bottom, beside the footer's link field;
+   on the right the column that tells of the row stood on. The field is
+   the search: what is typed in it narrows the rows, by the title, the
+   other names, the link, the year or the name of any part the link opened. */
+function buildHistory() {
+  histPop.replaceChildren();
+  const main = document.createElement('div'); main.className = 'histpop__main';
+  const top = document.createElement('div'); top.className = 'histpop__top';
+  const head = document.createElement('span'); head.className = 'histpop__head'; head.textContent = t('queue.history');
+  const count = document.createElement('span'); count.className = 'histpop__count';
+  top.append(head, count);
+  const list = document.createElement('div'); list.className = 'histpop__list';
+  main.append(top, list);
+  const side = document.createElement('div'); side.className = 'histpop__side';
+  histPop.append(main, side);
+  paintHistoryList();
+}
+/* the letters searched for, lit where they stand in a text */
+function markHits(text, q) {
+  const frag = document.createDocumentFragment(), str = String(text || '');
+  if (!q) { frag.append(str); return frag; }
+  const low = str.toLowerCase();
+  let i = 0;
+  for (let at = low.indexOf(q); at >= 0; at = low.indexOf(q, i)) {
+    if (at > i) frag.append(str.slice(i, at));
+    const m = document.createElement('mark'); m.className = 'histpop__hit'; m.textContent = str.slice(at, at + q.length); frag.append(m);
+    i = at + q.length;
+  }
+  if (i < str.length) frag.append(str.slice(i));
+  return frag;
+}
+/* The column: the parts of the franchise the row stood on holds, in their
+   order, each with its cover, its title, one other name, its year, its kind
+   and how many episodes; what a part did not say is left out. The letters
+   searched for are lit here too, so a row found by a part's name says why. */
+function paintHistorySide(h) {
+  const side = histPop.querySelector('.histpop__side');
+  if (!side) return;
+  side.replaceChildren();
+  if (!h) return;
+  const q = histQuery.trim().toLowerCase();
+  const parts = [...(h.parts || [])].sort((a, b) => (a.ordinal ?? 1e9) - (b.ordinal ?? 1e9));
+  const top = document.createElement('div'); top.className = 'histpop__top';
+  const head = document.createElement('span'); head.className = 'histpop__head'; head.textContent = t('hist.parts');
+  const count = document.createElement('span'); count.className = 'histpop__count'; count.textContent = String(parts.length);
+  top.append(head, count);
+  const list = document.createElement('div'); list.className = 'histpop__parts';
+  for (const p of parts) {
+    const el = document.createElement('div'); el.className = 'histpop__part';
+    const coverUrl = p.coverFile ? `/api/history/cover/${encodeURIComponent(p.id)}` : null;
+    const cover = coverUrl ? document.createElement('img') : document.createElement('span');
+    cover.className = 'histpop__cover' + (coverUrl ? '' : ' histpop__cover--none');
+    if (coverUrl) { cover.src = coverUrl; cover.alt = ''; cover.loading = 'lazy'; } else cover.innerHTML = phSvg(PH.fileVideo);
+    const body = document.createElement('div'); body.className = 'histpop__body';
+    const title = document.createElement('div'); title.className = 'histpop__parttitle'; title.append(markHits(p.title || '', q));
+    body.append(title);
+    if (p.alt && /[\u0400-\u04ff]/.test(p.title || '') && !/[\u0400-\u04ff]/.test(p.alt)) { const alt = document.createElement('div'); alt.className = 'histpop__partalt'; alt.append(markHits(p.alt, q)); body.append(alt); }
+    const kind = kindLabel(p) || (p.kind === 'tv' ? t('info.tv') : '');
+    const meta = document.createElement('div'); meta.className = 'histpop__partmeta';
+    meta.textContent = [p.year, kind, p.episodes ? t('pop.episodes', { n: p.episodes }) : null, p.dubs ? t('queue.dubs', { n: p.dubs }) : null].filter(Boolean).join(' · ');
+    if (meta.textContent) body.append(meta);
+    el.append(cover, body);
+    list.append(el);
+  }
+  side.append(top, list);
+  /* the column opens on the first part the search found, so what was found is in sight */
+  const hit = list.querySelector('.histpop__hit');
+  if (hit) list.scrollTop = Math.max(0, hit.closest('.histpop__part').offsetTop - 6);
+}
+/* a title without its season: "2 сезон", "Season 2", "TV-2", "Part 2", a
+   closing number equal to the season; what is left says whose season it is */
+const SEASON_MARKS = [/\d{1,2}\s*-?\s*(?:й|ой|ый)?\s*сезон/giu, /сезон\s*№?\s*\d{1,2}(?!\d)/giu, /season\s*\d{1,2}/gi, /\d{1,2}(?:st|nd|rd|th)\s+season/gi, /(?:^|\s)(?:part|часть)\s*\d{1,2}(?!\d)/giu, /\bS\d{1,2}\b(?!\d)/g, /(?:ТВ|TV)-\d{1,2}(?!\d)/giu];
+function titleBase(title, season) {
+  let s = String(title || '');
+  for (const re of SEASON_MARKS) s = s.replace(re, ' ');
+  s = s.replace(/[\s\p{P}]+/gu, ' ').trim();
+  if (season) s = s.replace(new RegExp(`(?:^|\\s)${Number(season)}$`), '');
+  return s.trim().toLowerCase();
+}
+function historyRow(h) {
+  const row = document.createElement('button');
+  row.className = 'histpop__row';
+  row.type = 'button';
+  const cover = h.cover ? document.createElement('img') : document.createElement('span');
+  cover.className = 'histpop__cover' + (h.cover ? '' : ' histpop__cover--none');
+  if (h.cover) { cover.src = h.cover; cover.alt = ''; cover.loading = 'lazy'; } else cover.innerHTML = phSvg(PH.fileVideo);
+  const body = document.createElement('div'); body.className = 'histpop__body';
+  row.__h = h;
+  const title = document.createElement('div'); title.className = 'histpop__title'; title.append(markHits(h.title || h.url, histQuery.trim().toLowerCase()));
+  /* what the series is on the left, when it was pasted on the right */
+  const meta = document.createElement('div'); meta.className = 'histpop__meta';
+  const about = document.createElement('span'); about.textContent = [h.year, h.season ? t('queue.season', { n: h.season }) : null, h.episodes ? t('pop.episodes', { n: h.episodes }) : null].filter(Boolean).join(' · ');
+  const when = document.createElement('span'); when.className = 'histpop__when'; when.textContent = whenWords(h.at);
+  meta.append(about, when);
+  body.append(title, meta);
+  /* where watching stopped, across the parts the link opened: the head
+     names the part, the tail says the episode, the time and the dub. The
+     tail never breaks: it stands at the end of the line while it fits,
+     else it goes whole to the next one. The link's own part needs no name;
+     a film is named by its title; a part whose title is the row's with
+     only the season changed is named by the season; any other part (a
+     branch, a title of its own) by its title, as the site calls it. */
+  const last = h.last;
+  if (last) {
+    const stop = document.createElement('div'); stop.className = 'histpop__stop';
+    const part = last.seriesId !== h.seriesId ? (h.parts || []).find(x => x.id === last.seriesId) : null;
+    const film = part ? part.kind === 'movie' : h.kind === 'movie';
+    const name = !part ? '' : !film && part.season && titleBase(part.title, part.season) === titleBase(h.title, h.season) ? t('queue.season', { n: part.season }) : part.title;
+    const head = [t(last.done ? 'hist.finishedAt' : 'hist.stoppedAt'), name].filter(Boolean).join(' · ');
+    const tail = document.createElement('span'); tail.className = 'histpop__tail';
+    tail.textContent = [film ? '' : t('hist.ep', { n: last.episode }), last.done ? '' : fmt(last.t), last.dub || ''].filter(Boolean).join(' · ');
+    stop.append(tail.textContent ? head + ' · ' : head, tail);
+    body.append(stop);
+  }
+  /* the link as pasted, unless the settings keep it out of sight */
+  if (state.set.histLinks !== 'off') { const link = document.createElement('div'); link.className = 'histpop__url'; link.textContent = h.url; body.append(link); }
+  /* the cross in the corner, seen on hover: the link leaves the history, and only the
+     history (what was watched is the series' memory); pasted again, it is a new row */
+  const x = document.createElement('span');
+  x.className = 'histpop__x'; x.setAttribute('role', 'button'); x.tabIndex = 0; x.title = t('hist.forget');
+  x.innerHTML = phSvg(PH.x);
+  const forget = async ev => {
+    ev.stopPropagation(); ev.preventDefault();
+    try { await post('/api/history/forget?url=' + encodeURIComponent(h.url)); } catch (_) { return; }
+    histList = histList.filter(o => o.url !== h.url);
+    await leaveHistoryRow(row);
+  };
+  x.onclick = forget;
+  x.onkeydown = ev => { if (ev.key === 'Enter' || ev.key === ' ') forget(ev); };
+  row.append(cover, body, x);
+  /* the link opens where it was left: the episode stopped in, or the one after the last finished */
+  row.onclick = ev => { ev.stopPropagation(); closeHistory(); queueLinkInput.value = ''; openLink(h.url, last ? { at: { seriesId: last.seriesId, number: last.done ? last.episode + 1 : last.episode } } : {}); };
+  return row;
+}
+/* The row stood on, lit as a row under the pointer is: there is always one
+   while rows are shown, the newest at first; the arrows in the footer's
+   field walk the rows up and down, the pointer takes the standing with it;
+   Enter opens the row stood on. The column follows the standing: at once
+   from the keys, and after the pointer has rested on a row a moment, so a
+   pointer crossing the list does not make the column flicker. */
+let histActive = null, histSideT = 0, histDwell = null;
+const HIST_DWELL = 700;
+function setHistActive(row) {
+  histPop.querySelector('.histpop__row.is-active')?.classList.remove('is-active');
+  histActive = row || null;
+  clearTimeout(histSideT); histDwell = null;
+  if (!row) { paintHistorySide(null); return; }
+  row.classList.add('is-active');
+  paintHistorySide(row.__h);
+  /* the list alone scrolls to show it: no ancestor is moved on the way */
+  const list = row.parentElement, top = row.offsetTop, bottom = top + row.offsetHeight;
+  if (top < list.scrollTop) list.scrollTop = top;
+  else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight;
+}
+queueLinkInput.addEventListener('keydown', e => {
+  if (histPop.hidden || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || e.metaKey || e.ctrlKey || e.altKey) return;
+  const rows = [...histPop.querySelectorAll('.histpop__row')];
+  if (!rows.length) return;
+  e.preventDefault();
+  histPop.classList.add('is-keys');
+  const i = histActive ? rows.indexOf(histActive) : rows.length;
+  setHistActive(rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === 'ArrowUp' ? -1 : 1)))]);
+});
+/* The pointer takes the standing when it has rested on a row a moment: a
+   pointer crossing the rows on its way to the column changes nothing. It
+   must move for that, too: the list scrolling under a pointer at rest brings
+   other rows under it, and the browser reports those as entered, which is
+   not a move of the hand. */
+let histPointer = null;
+histPop.addEventListener('mousemove', e => {
+  if (histPointer && histPointer.x === e.clientX && histPointer.y === e.clientY) return;
+  histPointer = { x: e.clientX, y: e.clientY };
+  histPop.classList.remove('is-keys');
+  const row = e.target.closest('.histpop__row');
+  if (!row || row === histActive) { clearTimeout(histSideT); histDwell = null; return; }
+  if (row === histDwell) return;
+  clearTimeout(histSideT); histDwell = row;
+  histSideT = setTimeout(() => { if (histDwell === row && row.isConnected) setHistActive(row); }, HIST_DWELL);
+});
+histPop.addEventListener('mouseleave', () => { clearTimeout(histSideT); histDwell = null; });
+/* A row leaves the list from the top down. It is taken out of the flow at
+   once, the scroll gives back its height where it can, and the rows stand
+   where they now stand; then everything that moved slides from where it
+   was on the screen to where it is, together and at one pace. A fading copy
+   of the row stays where it was meanwhile. The list answers no pointer until
+   settled, and the standing passes to the row that took the place. */
+const LEAVE_MS = 450, LEAVE_EASE = 'cubic-bezier(.2,.8,.3,1)';
+function leaveHistoryRow(row) {
+  const list = row.parentElement;
+  if (!list) return Promise.resolve();
+  const rows = [...list.querySelectorAll('.histpop__row')].filter(r => r !== row);
+  const at = r => r.getBoundingClientRect().top;
+  const before = new Map(rows.map(r => [r, at(r)]));
+  const was = row.getBoundingClientRect(), st0 = list.scrollTop, h = row.offsetHeight, i = [...list.querySelectorAll('.histpop__row')].indexOf(row);
+  const ghost = row.cloneNode(true);
+  ghost.classList.add('histpop__ghost');
+  list.classList.add('is-settling');
+  row.remove();
+  if (histActive === row) histActive = null;
+  const count = histPop.querySelector('.histpop__count');
+  if (count) count.textContent = String(histList.length);
+  if (!histList.length) { const e = document.createElement('div'); e.className = 'histpop__empty'; e.textContent = t('hist.empty'); list.append(e); }
+  list.scrollTop = Math.max(0, st0 - h);
+  placeHistory();
+  const pop = histPop.getBoundingClientRect();
+  ghost.style.left = (was.left - pop.left) + 'px'; ghost.style.top = (was.top - pop.top) + 'px'; ghost.style.width = was.width + 'px';
+  histPop.append(ghost);
+  /* first frame: everything held at its old place */
+  for (const r of rows) { r.style.transition = 'none'; r.style.transform = `translateY(${before.get(r) - at(r)}px)`; }
+  ghost.style.transition = 'none';
+  void histPop.offsetHeight;
+  return new Promise(done => {
+    requestAnimationFrame(() => {
+      for (const r of rows) { r.style.transition = `transform ${LEAVE_MS}ms ${LEAVE_EASE}`; r.style.transform = ''; }
+      ghost.style.transition = `opacity 220ms ease`; ghost.style.opacity = '0';
+      setTimeout(() => {
+        for (const r of rows) { r.style.transition = ''; r.style.transform = ''; }
+        ghost.remove(); list.classList.remove('is-settling');
+        placeHistory();
+        if (!histActive) setHistActive(rows[Math.min(i, rows.length - 1)] || null);
+        done();
+      }, LEAVE_MS + 20);
+    });
+  });
+}
+const histMatches = (h, q) => [h.title, h.url, h.year, ...(h.altTitles || []), ...(h.parts || []).flatMap(p => [p.title, p.alt])].some(x => String(x || '').toLowerCase().includes(q));
+function paintHistoryList() {
+  const list = histPop.querySelector('.histpop__list');
+  if (!list) return;
+  const count = histPop.querySelector('.histpop__count');
+  if (count) count.textContent = String(histList.length);
+  const q = histQuery.trim().toLowerCase();
+  const shown = q ? histList.filter(h => histMatches(h, q)) : histList;
+  list.replaceChildren(); histActive = null;
+  const say = text => { const e = document.createElement('div'); e.className = 'histpop__empty'; e.textContent = text; list.append(e); };
+  if (!histList.length) say(t('hist.empty'));
+  else if (!shown.length) say(t('hist.nothing'));
+  for (const h of shown) list.append(historyRow(h));
+  placeHistory();
+  list.scrollTop = list.scrollHeight;
+  /* one row always stands out: the newest of those shown, until the arrows or the pointer choose another */
+  setHistActive(list.querySelector('.histpop__row:last-child'));
+}
+/* To the right of the footer's buttons, so neither is covered, its bottom
+   at the button's. A window too narrow for that puts the frame above the
+   footer instead: to the left, and lower by what the footer takes. */
+function placeHistory() {
+  const add = queueAdd.getBoundingClientRect();
+  histPop.style.height = '';
+  const w = histPop.offsetWidth, h = histPop.offsetHeight;
+  if (add.right + 8 + w + 12 <= window.innerWidth) {
+    histPop.classList.remove('is-above');
+    histPop.style.left = (add.right + 8) + 'px';
+    histPop.style.top = Math.max(12, Math.min(add.bottom - h, window.innerHeight - h - 12)) + 'px';
+  } else {
+    histPop.classList.add('is-above');
+    const h2 = Math.max(240, Math.min(h, add.top - 8 - 12));
+    histPop.style.height = h2 + 'px';
+    histPop.style.left = Math.max(12, window.innerWidth - w - 12) + 'px';
+    histPop.style.top = Math.max(12, add.top - 8 - h2) + 'px';
+  }
+}
+/* The list opens from the footer's link field as soon as it is focused,
+   since the field searches the list; only when there is something in the
+   history, so a first link is typed in peace. What the field holds is the
+   search from the start. */
+let histOpening = null;
+async function openHistory() {
+  const loading = histOpening || (histOpening = loadHistory().finally(() => { histOpening = null; }));
+  await loading;
+  if (!histList.length || document.activeElement !== queueLinkInput || !histPop.hidden) return;
+  histQuery = queueLinkInput.value;   // what was typed while the list loaded
+  histPop.hidden = false; buildHistory();
+}
+function closeHistory() { histPop.hidden = true; clearTimeout(histSideT); }
+queueLinkInput.addEventListener('focus', () => { if (histPop.hidden) openHistory(); });
+queueLinkInput.addEventListener('input', () => {
+  histQuery = queueLinkInput.value;
+  histPop.classList.add('is-keys');   // typing stands on the newest row left, whatever the pointer is over
+  if (histPop.hidden) { if (histList.length) openHistory(); return; }
+  paintHistoryList();
+});
+histPop.addEventListener('click', e => e.stopPropagation());
+document.addEventListener('click', e => {
+  /* the field keeps the list; any other click closes it and does nothing else */
+  if (histPop.hidden || e.target.closest('#histPop, #queueLinkForm')) return;
+  e.stopPropagation(); e.preventDefault();
+  closeHistory();
+}, true);
+/* Esc in the history: a search typed is cleared first, then the list closes */
+function escapeHistory() {
+  if (histPop.hidden) return false;
+  if (queueLinkInput.value) { queueLinkInput.value = ''; histQuery = ''; paintHistoryList(); return true; }
+  closeHistory(); return true;
+}
+
+addEventListener('resize', () => { if (!histPop.hidden) placeHistory(); });
+
+/* ── the map of dubs across the parts ─────────────────────────
+   Built from what the queue already holds: every row's dubs. The dubs
+   stand on top by name, those in the most episodes first; under them
+   each part is its episodes as cells. A dub under the pointer lights the
+   cells that have it, a click keeps it lit; a cell under the pointer
+   lights its own dubs in the list. Nothing is chosen here: the map is
+   for looking. The overview window and the audio menu draw the same map. */
+function buildDubMap(host) {
+  host.replaceChildren(); host.classList.remove('is-keyed', 'is-cell');
+  let pinned = null;
+  const dubs = new Map();
+  for (const it of state.list) for (const d of it.dubs || []) {
+    const k = d.key || d.name; if (!k) continue;
+    const o = dubs.get(k) || { key: k, name: d.name || k, n: 0 };
+    o.n++; dubs.set(k, o);
+  }
+  const names = [...dubs.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
+  const groups = state.seasons.length
+    ? state.seasons.map(s => ({ ordinal: s.ordinal || null, title: s.series.title || '', year: s.series.year, items: state.list.filter(it => it.seriesId === s.series.id) })).filter(g => g.items.length)
+    : [{ ordinal: null, title: '', year: null, items: state.list.slice() }];
+  const list = document.createElement('div'); list.className = 'over__dubs';
+  const cells = [];
+  /* Two lights. A dub under the pointer, or the one kept by a click, lights
+     the cells that have it. A cell under the pointer lights its own dubs in
+     the list, and only those; the map keeps showing the kept dub meanwhile. */
+  const key = k => {
+    host.classList.toggle('is-keyed', !!k);
+    for (const c of cells) c.classList.toggle('is-on', !!k && c.__dubs.has(k));
+    for (const b of list.children) b.classList.toggle('is-on', !!k && b.__key === k);
+  };
+  const byCell = c => {
+    host.classList.toggle('is-cell', !!c);
+    for (const b of list.children) b.classList.toggle('is-on', c ? c.__dubs.has(b.__key) : !!pinned && b.__key === pinned);
+  };
+  for (const d of names) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'over__dub'; b.textContent = d.name; b.__key = d.key;
+    b.onmouseenter = () => key(d.key);
+    b.onmouseleave = () => key(pinned);
+    b.onclick = ev => { ev.stopPropagation(); pinned = pinned === d.key ? null : d.key; key(pinned || d.key); };
+    list.append(b);
+  }
+  const map = document.createElement('div'); map.className = 'over__map';
+  /* a cell speaks after the pointer has rested on it a moment, so a pointer crossing
+     the map does not flicker the list; inside the part already spoken for, at once */
+  let cellT = 0, spokenRow = null;
+  for (const g of groups) {
+    const part = document.createElement('div'); part.className = 'over__part';
+    if (g.title) {
+      /* the part named as the queue names it, the number and the tab's bar, then the title and the year */
+      const name = document.createElement('div'); name.className = 'over__partname';
+      if (g.ordinal) { const tab = document.createElement('span'); tab.className = 'queue__group-label'; tab.append(Object.assign(document.createElement('span'), { className: 'n', textContent: String(g.ordinal) })); name.append(tab); }
+      name.append(Object.assign(document.createElement('span'), { className: 'over__parttitle', textContent: [g.title, g.year].filter(Boolean).join(' · ') }));
+      part.append(name);
+    }
+    const row = document.createElement('div'); row.className = 'over__cells';
+    for (const it of [...g.items].sort((a, b) => (a.number || 0) - (b.number || 0))) {
+      const c = document.createElement('span'); c.className = 'over__cell'; c.textContent = it.number ?? '';
+      c.__dubs = new Set((it.dubs || []).map(d => d.key || d.name));
+      c.onmouseenter = () => {
+        clearTimeout(cellT);
+        if (spokenRow === row) byCell(c); else cellT = setTimeout(() => { spokenRow = row; byCell(c); }, 200);
+      };
+      cells.push(c); row.append(c);
+    }
+    row.onmouseleave = () => { clearTimeout(cellT); spokenRow = null; byCell(null); };
+    part.append(row); map.append(part);
+  }
+  host.append(list, map);
+  /* the map can be lit from outside too, as a name under the pointer lights it: the audio menu's rows do this */
+  return { dubs: names.length, light: k => key(k || pinned) };
+}
+/* ── the overview window: the map on its own, from the queue's header ── */
+function buildOverview() {
+  overview.replaceChildren();
+  const top = document.createElement('div'); top.className = 'histpop__top';
+  const head = document.createElement('span'); head.className = 'histpop__head'; head.textContent = t('queue.overview');
+  const count = document.createElement('span'); count.className = 'histpop__count';
+  top.append(head, count);
+  const host = document.createElement('div'); host.className = 'dubmap';
+  count.textContent = String(buildDubMap(host).dubs);
+  overview.append(top, host);
+}
+function openOverview() { if (!state.list.length) return; buildOverview(); overview.hidden = false; }
+function closeOverview() { overview.hidden = true; }
+btnOverview.onclick = ev => { ev.stopPropagation(); if (overview.hidden) openOverview(); else closeOverview(); };
+overview.addEventListener('click', e => e.stopPropagation());
+/* a click outside only closes the window: the press itself gives no focus
+   away (a field focused would open the history), the click does nothing else */
+document.addEventListener('mousedown', e => { if (!overview.hidden && !e.target.closest('#overview, #btnOverview')) e.preventDefault(); }, true);
+document.addEventListener('click', e => {
+  if (overview.hidden || e.target.closest('#overview, #btnOverview')) return;
+  e.stopPropagation(); e.preventDefault();
+  closeOverview();
+}, true);
 
 /* ── which dub and which stream play ─────────────────────────
    The server opens the episode's page if it has not, takes the dub
@@ -857,12 +1486,19 @@ async function openLink(url, { autoplay = true, at = null, quiet = false } = {})
    its best stream. A stream that just failed is passed in so that its
    source is marked dead and another one is picked. */
 async function resolveItem(it, { avoid = null } = {}) {
-  if (it.opening) return it.opening;
-  it.opening = (async () => {
-    const q = new URLSearchParams({ series: it.seriesId, episode: String(it.number) });
-    if (state.dubKey) q.set('dub', state.dubKey);
-    if (avoid) q.set('avoid', avoid);
-    const r = await api('/api/resolve?' + q);
+  /* the same question already asked is not asked twice; a different one
+     (another dub chosen while the first answer is on its way) is, and the
+     newer answer is the one kept */
+  const q = new URLSearchParams({ series: it.seriesId, episode: String(it.number) });
+  if (state.dubKey) q.set('dub', state.dubKey);
+  if (avoid) q.set('avoid', avoid);
+  const ask = q.toString();
+  if (it.opening && it.opening.ask === ask) return it.opening.promise;
+  const opening = { ask, promise: null };
+  opening.promise = (async () => {
+    const t0 = performance.now();
+    let r; try { r = await api('/api/resolve?' + q); } catch (e) { diary('resolve', `episode ${it.number}: failed in ${Math.round(performance.now() - t0)}ms: ${e.message.slice(0, 80)}`); throw e; }
+    diary('resolve', `episode ${it.number}${state.dubKey ? ' dub ' + state.dubKey : ''}${avoid ? ' avoiding one' : ''}: ${Math.round(performance.now() - t0)}ms, ${r.stream ? 'a stream' : 'no stream'} from ${(r.source && r.source.player) || '?'}, ${(r.streams || []).length} streams, ${(r.dead || []).length} dead`);
     it.dubs = r.dubs; it.dub = r.dub; it.source = r.source;
     it.streams = r.streams || [];
     it.stream = pickStream(it.streams, r.stream) || r.stream;
@@ -876,7 +1512,8 @@ async function resolveItem(it, { avoid = null } = {}) {
     if (r.episode.title && !it.title) { it.title = r.episode.title; it.name = nameFor(r.episode, state.seasons.find(s => s.series.id === it.seriesId)?.series); }
     return r;
   })();
-  try { return await it.opening; } finally { it.opening = null; }
+  it.opening = opening;
+  try { return await opening.promise; } finally { if (it.opening === opening) it.opening = null; }
 }
 
 /* ── which quality plays ─────────────────────────────────────
@@ -954,6 +1591,9 @@ function pickQuality(opt) {
   if (!it) return;
   if (opt.level !== undefined) {           // a level inside one HLS stream
     if (hls) hls.currentLevel = opt.level;
+    /* the choice is kept, as a quality picked any other way is: the next episode starts in it */
+    const wanted = opt.level === -1 ? 'auto' : /^\d{3,4}p$/.test(opt.main) ? opt.main : null;
+    if (wanted) { state.quality = wanted; saveStr('lapka.quality', wanted); }
     toast(t('quality.current', { name: opt.main }));
     setTimeout(syncQualityButton, 300);
     return;
@@ -972,8 +1612,34 @@ btnQuality.onclick = e => {
   qualityMenu.classList.toggle('open');
 };
 
+/* ── the library before the net ───────────────────────────────
+   An episode saved in the dub wanted plays from its file: no page is
+   read, no source is asked, nothing is pulled ahead. Another dub
+   chosen and no file of it, and the net is asked as before. A file
+   that fails to play is passed over for that start, and the net takes
+   it; the mark in the dub menu brings the file back. */
+function localFor(it) {
+  if (!it || it.noLocal) return null;
+  const files = state.saved.get(savedKey(it)) || [];
+  if (!files.length) return null;
+  return (state.dubKey ? files.find(x => x.dubKey === state.dubKey) : files[0]) || null;
+}
+
 async function sourceFor(it) {
   const avoid = it.avoid; it.avoid = null;
+  const loc = localFor(it);
+  if (loc) {
+    diary('local', `episode ${it.number} from the library, dub ${loc.dub}${loc.quality ? ' ' + loc.quality : ''}`);
+    it.err = false;
+    it.dub = { key: loc.dubKey, name: loc.dub };
+    if (loc.dubKey) state.dubKey = loc.dubKey;
+    it.source = { player: t('audio.disk'), local: true };
+    it.streams = []; it.subs = []; it.marks = null;
+    if (!it.subPicked) it.subIndex = preferredSub(it);
+    it.stream = { kind: 'mp4', quality: loc.quality, play: '/api/library/file?path=' + encodeURIComponent(loc.path), local: true, id: null, player: null };
+    paintMeta();
+    return it.stream;
+  }
   const slow = setTimeout(() => showProgress(it, 'prep.players'), 400);
   let r;
   try { r = await resolveItem(it, { avoid }); }
@@ -987,7 +1653,7 @@ async function sourceFor(it) {
   if (it !== cur()) return null;
   if (!r.stream) {
     /* no live source: the reason stands on the stage, a closed player named as such */
-    const why = (r.dead || []).map(d => d.error === 'no extractor' ? t('why.closedPlayer', { player: d.player }) : `${d.player}: ${d.error}`).join('; ');
+    const why = (r.dead || []).map(d => d.error === 'no extractor' ? t('why.closedPlayer', { player: d.player }) : d.error === 'closed door' ? t('why.closedDoor', { player: d.player }) : `${d.player}: ${whyText(d.error)}${d.error && d.error.key === 'other' && d.error.detail ? ' ' + d.error.detail : ''}`).join('; ');
     it.err = true; it.why = why; render();
     showNotice(t('notice.noOpen', { name: it.name, why }), { mid: true });
     return null;
@@ -999,14 +1665,97 @@ async function sourceFor(it) {
   /* mid-switch: the line now names the source being tried */
   if (it.switching && r.source) showNotice(t('notice.switchingTo', { from: it.switching.from || '?', to: r.source.player, n: it.switching.n, total: 3 }), { kind: 'switching', busy: true });
   paintMeta();
-  return r.stream;
+  /* the stream this page chose for the wanted quality, not the server's best: the server does not know the quality wanted */
+  return it.stream || r.stream;
 }
 
 /* The next episode is opened while the current one plays, so that
    its streams are ready when it is its turn. */
 function prefetchNext() {
   const nx = state.list[idxOf(cur()) + 1];
-  if (nx && !nx.stream && !nx.err && !nx.opening) resolveItem(nx).then(() => paintMeta()).catch(() => {});
+  if (nx && !nx.stream && !nx.err && !nx.opening && !localFor(nx)) resolveItem(nx).then(() => paintMeta()).catch(() => {});   // a saved one needs no opening
+}
+
+/* ── the episode ahead of the player ──────────────────────────
+   With loading ahead on, the episode playing is pulled into the cache
+   whole while it plays, and the next one once this one is there; the
+   player then reads from the disk, and a line that lags or an origin
+   that drops out is not seen. Off, the player asks for the half minute
+   it needs, as any player does. The server pulls one episode at a
+   time; the page asks for the one playing at the quality in play, and
+   reads how far it got now and then. */
+const prefetchOn = () => (state.remote.settings?.prefetch || 'on') !== 'off';   // on unless switched off
+let warmT = null, warmedFor = null;
+const warmLevel = () => (hls && hls.levels && hls.levels.length > 1 && hls.currentLevel >= 0 && hls.levels[hls.currentLevel].height) || null;
+function warmCurrent() {
+  const it = cur();
+  if (!prefetchOn() || !it || !it.stream || it.stream.kind !== 'hls') return;
+  warmedFor = it.stream.id;
+  askWarm(it, warmLevel());
+}
+async function askWarm(it, level) {
+  try {
+    const r = await post('/api/warm?stream=' + it.stream.id + (level ? '&level=' + level : ''));
+    diary('warm', `episode ${it.number}${level ? ' ' + level + 'p' : ''}: ${r.job ? r.job.state : '?'}`);
+    watchWarm();
+  } catch (e) { diary('warm', `episode ${it.number}: refused, ${String(e.message).slice(0, 60)}`); }
+}
+function watchWarm() {
+  clearTimeout(warmT);
+  warmT = setTimeout(async () => {
+    if (!prefetchOn()) return;
+    let d; try { d = await api('/api/warm'); } catch (_) { return; }
+    const job = d.job;
+    if (!job) return;
+    if (job.state === 'working') { watchDisk(); return watchWarm(); }
+    diary('warm', `${job.done}/${job.total} ${job.state}${job.error ? ' ' + (job.error.key || '') : ''}`);
+    const it = cur();
+    /* the episode playing is there whole: the next one follows, and no further */
+    if (job.state === 'done' && it && it.stream && job.streamId === it.stream.id) warmNext(it, job.level);
+    /* the origin dropped out while the episode was being pulled: asked again in half a minute, for as long as it plays; the pieces already there are passed over */
+    if (job.state === 'error' && it && it.stream && job.streamId === it.stream.id) warmT = setTimeout(() => { if (cur() === it) askWarm(it, job.level); }, 30000);
+  }, 2500);
+}
+/* ── what of the episode is on the disk, on the timeline ────────
+   The player's own buffer is a minute or two of memory, and the
+   timeline's lighter band shows that; the disk holds whatever passed
+   through, played or pulled ahead, and the band under it shows that,
+   in stretches, read from the server now and then while an HLS episode
+   plays. A gap in the band is a gap on the disk. */
+let diskT = null, lastDisk = null;   // the band as last read, told to the journal when a wait does not end
+function paintDisk(d) {
+  lastDisk = d;
+  const dur = duration() || (d && d.duration) || 0;
+  seekDisk.replaceChildren();
+  if (!d || !dur) return;
+  for (const [a, b] of d.ranges || []) {
+    const i = document.createElement('i');
+    i.style.left = Math.max(0, Math.min(100, a / dur * 100)) + '%';
+    i.style.width = Math.max(0, Math.min(100, (b - a) / dur * 100)) + '%';
+    seekDisk.append(i);
+  }
+}
+async function watchDisk() {
+  clearTimeout(diskT);
+  const it = cur();
+  if (!it || !it.stream || it.loadedSrc !== it.stream.play) { paintDisk(null); return; }
+  /* a file from the library is on the disk whole */
+  if (it.stream.local) { const dur = duration(); paintDisk(dur ? { ranges: [[0, dur]], duration: dur, tag: 'file' } : null); return; }
+  if (it.stream.kind !== 'hls') { paintDisk(null); return; }
+  const level = warmLevel();
+  let d = null;
+  try { d = await api(`/api/stream/${it.stream.id}/cached${level ? '?level=' + level : ''}`); } catch (_) { /* the server will answer next time */ }
+  if (cur() !== it) return;
+  paintDisk(d);
+  diskT = setTimeout(watchDisk, 4000);
+}
+
+async function warmNext(it, level) {
+  const nx = state.list[idxOf(it) + 1];
+  if (!nx || nx.err) return;
+  if (!nx.stream) { try { await resolveItem(nx); } catch (_) { return; } }
+  if (cur() !== it || !prefetchOn() || !nx.stream || nx.stream.kind !== 'hls') return;
+  askWarm(nx, level);
 }
 
 /* ── changing the picture ─────────────────────────────────────
@@ -1037,12 +1786,16 @@ let playToken = 0;
 async function playItem(it, autoplay = true, glide = true) {
   if (!it) return;
   airplay.suspend();
+  diary('play', `episode ${it.number}${autoplay ? '' : ' (no autoplay)'}${it.switching ? ' switching try ' + it.switching.n : ''}${it.avoid ? ' avoiding a stream' : ''}`);
+  if (loaded) markPos(loaded, video.currentTime);   // where the episode before was left
+  loaded = null;
   state.current = it;
   state.seekPreview = null;
   if (dubsInfo && (dubsInfo.seriesId !== it.seriesId || dubsInfo.episode !== it.number)) dubsInfo = null;
   skipNow = null; skipEl.hidden = true;
   if (!it.switching) hideNotice();   // the notice of a source being switched stays until the picture is back
   endCard.classList.remove('show');
+  restoredIdle = false; hidePauseInfo();
   emptyEl.classList.add('hide');
   stage.classList.remove('is-empty');
 
@@ -1077,7 +1830,7 @@ async function playItem(it, autoplay = true, glide = true) {
   /* returning to the last position: only if the episode was left in
      the middle, and only once per start, after that it is ordinary
      watching */
-  const back = state.positions[posKey(it)];
+  const back = (state.positions[posKey(it)] || {}).t;
   loadSource(it, src, token, () => {
   syncSubsButton(); applySubs(it);   // the tracks of this source, when there are any
     const d = duration();
@@ -1100,14 +1853,17 @@ async function playItem(it, autoplay = true, glide = true) {
    comes last. A refused play() is not reported: it also fails on every
    interrupted start, and the play button shows the state anyway. */
 async function loadSource(it, src, token, onMeta, play) {
+  diary('load', `${src.kind || '?'} ${src.quality || 'auto'} from ${(it.source && it.source.player) || '?'}, play ${play}`);
   it.loadedSrc = src.play;
+  loaded = null;
   if (!await attachSource(src, token) || token !== playToken) return;
+  paintDisk(null); watchDisk();
   sayLoading(it);
   const reveal = fadeIn();
   video.addEventListener('loadeddata', reveal, { once: true });
   setTimeout(reveal, 4000);          // a fallback in case the frame never arrives
-  video.addEventListener('loadedmetadata', () => { if (token === playToken) onMeta(); }, { once: true });
-  if (play) video.play().catch(() => {});
+  video.addEventListener('loadedmetadata', () => { if (token === playToken) { loaded = it; onMeta(); watchDisk(); } }, { once: true });   // the length is known: the band can be drawn
+  if (play) video.play().catch(e => diary('play() refused', e && e.name));
 }
 
 /* The quality the user wants, applied inside an adaptive stream: the
@@ -1149,15 +1905,61 @@ async function attachSource(stream, token) {
     /* fewer silent retries than the defaults: a source that does not
        answer is given up on in seconds, not in a minute, and its
        trouble is said on the stage as soon as it starts */
-    hls = new Hls({ enableWorker: true, manifestLoadingTimeOut: 8000, manifestLoadingMaxRetry: 1, levelLoadingTimeOut: 8000, levelLoadingMaxRetry: 1, fragLoadingTimeOut: 12000, fragLoadingMaxRetry: 2 });
+    const policy = (firstByte, whole, retries) => ({ default: { maxTimeToFirstByteMs: firstByte, maxLoadTimeMs: whole, timeoutRetry: { maxNumRetry: retries, retryDelayMs: 0, maxRetryDelayMs: 0 }, errorRetry: { maxNumRetry: retries, retryDelayMs: 1000, maxRetryDelayMs: 8000 } } });
+    /* loading ahead: the player itself keeps a minute and a half instead of half a minute; the rest of the episode is the cache's */
+    const ahead = prefetchOn() ? { maxBufferLength: 90, maxBufferSize: 90 * 1000 * 1000 } : {};
+    hls = new Hls({ enableWorker: true, manifestLoadPolicy: policy(8000, 8000, 1), playlistLoadPolicy: policy(8000, 8000, 1), fragLoadPolicy: policy(12000, 60000, 2), ...ahead });
+    /* A fatal network error is the origin going quiet, not the stream
+       going bad: the same stream is asked to load again, three times,
+       four seconds apart, before another source is tried. The stream
+       stays: what is on the disk of it stays with it, and the quality
+       does not change under the viewer. A broken buffer gets one mend. */
+    const h = hls;
+    let again = 0, mended = false;
+    hls.on(Hls.Events.FRAG_LOADED, () => { again = 0; });
     hls.on(Hls.Events.ERROR, (_, d) => {
-      if (d.fatal) { video.dispatchEvent(new Event('error')); return; }
+      diary('hls', `${d.type}/${d.details}${d.fatal ? ' fatal' : ''}${d.response && d.response.code ? ' code ' + d.response.code : ''}`);
       const it = cur();
+      if (d.type === Hls.ErrorTypes.MEDIA_ERROR) bufferErrAt = performance.now();
+      if (d.fatal) {
+        if (d.type === Hls.ErrorTypes.NETWORK_ERROR && again < 3) {
+          again++;
+          diary('hls', `load again in 4 s, ${again} of 3`);
+          if (it && !it.switching) showNotice(t('notice.slow', { player: (it.source && it.source.player) || '' }), { kind: 'busy', busy: true });
+          setTimeout(() => { if (hls === h && cur() === it) h.startLoad(); }, 4000);
+          return;
+        }
+        /* a broken buffer is mended once: the buffers are built anew, which stops the video;
+           what played goes on by itself when it can, and the diary goes to the journal at once */
+        if (d.type === Hls.ErrorTypes.MEDIA_ERROR && !mended) {
+          mended = true;
+          const wasPlaying = !video.paused;
+          diary('hls', `media error: mending once, ${wasPlaying ? 'playing' : 'paused'} before`);
+          if (it && !it.switching) showNotice(t('notice.buffer'), { kind: 'busy', busy: true });
+          h.recoverMediaError();
+          if (wasPlaying) video.addEventListener('canplay', () => { if (hls === h && cur() === it) { diary('video', 'playing on after the mend'); video.play().catch(() => {}); } }, { once: true });
+          sendDiary('buffer mended');
+          return;
+        }
+        video.dispatchEvent(new Event('error')); return;
+      }
       /* a network error while the picture still moves is nothing to say; stalled, it is said at once */
       if (it && !it.switching && d.type === Hls.ErrorTypes.NETWORK_ERROR) { if (video.readyState < 3) showNotice(t('notice.slow', { player: (it.source && it.source.player) || '' }), { kind: 'busy', busy: true }); else sayStalled(it); }
     });
     hls.on(Hls.Events.MANIFEST_PARSED, () => { applyLevelPref(); syncQualityButton(); pickAudioTrack(stream); });
-    hls.on(Hls.Events.LEVEL_SWITCHED, () => { syncQualityButton(); if (audioMenu.classList.contains('open')) buildAudioMenu(); });
+    /* the first steps of a stream, for the diary: the manifest, the level, the first pieces */
+    hls.on(Hls.Events.MANIFEST_PARSED, (_, d) => diary('hls', `manifest parsed, ${(d.levels || []).length} levels`));
+    hls.on(Hls.Events.LEVEL_LOADED, (_, d) => diary('hls', `level loaded, ${d.details ? d.details.fragments.length : '?'} fragments`));
+    hls.on(Hls.Events.FRAG_LOADING, (_, d) => { if (d.frag && d.frag.sn <= 2) diary('hls', `fragment ${d.frag.sn} loading`); });
+    hls.on(Hls.Events.FRAG_LOADED, (_, d) => { if (d.frag && d.frag.sn <= 2) diary('hls', `fragment ${d.frag.sn} loaded`); });
+    hls.on(Hls.Events.LEVEL_SWITCHED, (_, d) => diary('hls', `level switched to ${d && h.levels && h.levels[d.level] ? h.levels[d.level].height + 'p' : d && d.level}${h.autoLevelEnabled ? ' (auto)' : ''}`));
+    hls.on(Hls.Events.LEVEL_SWITCHED, () => {
+      syncQualityButton(); if (audioMenu.classList.contains('open')) buildAudioMenu();
+      /* the quality in play is known: the episode is pulled ahead at it; a level hls.js picks by itself later does not start it over */
+      const it = cur();
+      if (it && it.stream && (warmedFor !== it.stream.id || state.quality !== 'auto')) warmCurrent();
+      watchDisk();
+    });
     hls.loadSource(stream.play);
     hls.attachMedia(video);
     return true;
@@ -1202,6 +2004,7 @@ function prev() {
 }
 function endOfQueue() {
   video.pause();
+  hidePauseInfo();
   paintEndMeta();
   endCard.classList.add('show');
   autoSwitch = false;        // there will be no more transitions
@@ -1409,20 +2212,32 @@ function syncAudioButton() {
 }
 
 let dubsInfo = null;          // what the server said each dub offers, for the episode the menu was built for
+/* The audio menu is two columns, as the subtitle menu is: on the left the
+   dubs to choose from, as they were; on the right, past the divider, the map
+   of which dubs the parts have, so the choice is made in sight of where it
+   holds. The map is not drawn in the PiP window, where the menu stays narrow. */
 function buildAudioMenu() {
   const opts = audioOptions();
   const it = cur();
   audioMenu.replaceChildren();
+  const pick = document.createElement('div'); pick.className = 'menu__col menu__col--pick';
   const head = document.createElement('div');
   head.className = 'menu__title';
   head.textContent = t('audio.title');
-  audioMenu.append(head);
+  pick.append(head);
+  const side = document.createElement('div'); side.className = 'menu__col menu__col--map hide-in-pip';
+  const sideHead = document.createElement('div'); sideHead.className = 'menu__title'; sideHead.textContent = t('queue.overview');
+  const host = document.createElement('div'); host.className = 'dubmap';
+  side.append(sideHead, host);
+  audioMenu.append(pick, side);
+  audioMenu.classList.toggle('menu--split', state.list.length > 0);
+  const dubMap = state.list.length ? buildDubMap(host) : null;
 
   if (!opts.length) {
     const e = document.createElement('div');
     e.className = 'menu__empty';
     e.textContent = t('audio.none');
-    audioMenu.append(e);
+    pick.append(e);
     return;
   }
 
@@ -1437,6 +2252,22 @@ function buildAudioMenu() {
     b.querySelector('.menu__main').textContent = o.main;
     if (o.sub) b.querySelector('.menu__sub').textContent = o.sub;
     const tags = b.querySelector('.menu__tags');
+    /* the dub saved on the disk is marked so; the mark plays the file */
+    const onDisk = (state.saved.get(savedKey(it)) || []).find(x => x.dubKey === o.id);
+    if (onDisk) {
+      const tg = document.createElement('span');
+      tg.className = 'qtag qtag--disk' + (o.sel && it.stream && it.stream.local ? ' sel' : '');
+      tg.textContent = t('audio.disk');
+      if (onDisk.quality) tg.title = onDisk.quality;
+      tg.onclick = ev => {
+        ev.stopPropagation();
+        it.noLocal = false;
+        if (it.dub && it.dub.key === o.id) { if (!(it.stream && it.stream.local)) switchTrack(it); }
+        else pickAudio(o);
+        markPicked(b);
+      };
+      tags.append(tg);
+    }
     if (info && info.qualities.length) {
       for (const q of info.qualities) {
         const tg = document.createElement('span');
@@ -1455,7 +2286,9 @@ function buildAudioMenu() {
       }
     } else if (info && info.unopened) { const w = document.createElement('span'); w.className = 'qtag qtag--wait'; w.textContent = '…'; tags.append(w); }
     b.onclick = () => { pickAudio(o); markPicked(b); };
-    audioMenu.append(b);
+    /* a row under the pointer lights the map on the right as its name there would: the name itself and the episodes that have it */
+    if (dubMap) { b.onmouseenter = () => dubMap.light(o.id); b.onmouseleave = () => dubMap.light(null); }
+    pick.append(b);
   }
   /* what each dub can play in is asked once per episode; the sources
      not yet opened are opened for it, and the menu is drawn again */
@@ -1477,7 +2310,10 @@ function pickAudio(opt, quality = null) {
     return;
   }
   state.dubKey = opt.id;
-  post(`/api/state/dub?series=${it.seriesId}&dub=${encodeURIComponent(opt.id)}`).catch(() => {});
+  /* noted for every part of the franchise open, so another part, or the same link pasted again, starts in it */
+  const ids = [...new Set([it.seriesId, ...state.seasons.map(s => s.series.id)])];
+  state.remote.dubs = state.remote.dubs || {};
+  for (const id of ids) { state.remote.dubs[id] = opt.id; post(`/api/state/dub?series=${id}&dub=${encodeURIComponent(opt.id)}`).catch(() => {}); }
   hideNotice();
   toast(t('audio.current', { name: opt.main }));
   switchTrack(it);
@@ -1738,20 +2574,23 @@ function segRow(menu, label, current, opts, pick) {
   const lab = document.createElement('span');
   lab.className = 'menu__rowlabel';
   lab.textContent = label;
-  const group = document.createElement('div');
-  group.className = 'seg2';
-  for (const [val, text] of opts) {
+  /* a null among the options starts a second line of buttons; the choice is one across both */
+  const groups = [], all = [];
+  let group = null;
+  for (const opt of opts) {
+    if (!opt || !group) { group = document.createElement('div'); group.className = 'seg2'; groups.push(group); if (!opt) continue; }
+    const [val, text] = opt;
     const b = document.createElement('button');
     b.textContent = text;
     b.className = current === val ? 'sel' : '';
     b.onclick = ev => {
       ev.stopPropagation();
-      for (const x of group.children) x.classList.toggle('sel', x === b);
+      for (const x of all) x.classList.toggle('sel', x === b);
       pick(val);
     };
-    group.append(b);
+    group.append(b); all.push(b);
   }
-  line.append(lab, group);
+  line.append(lab, ...groups);
   menu.append(line);
 }
 
@@ -1770,6 +2609,7 @@ const narrowWindow = matchMedia('(max-width:820px)');
 function queueDocked() { return state.set.queueMode === 'docked' && !narrowWindow.matches; }
 narrowWindow.addEventListener('change', () => applySettings());
 function applySettings() {
+  paintPauseInfo();
   workspace.classList.toggle('queue-docked', queueDocked());
   queueList.classList.toggle('no-drag', state.set.drag === 'off');
   for (const li of queueList.children) li.draggable = state.set.drag === 'on';
@@ -1783,20 +2623,25 @@ function applySettings() {
 /* Key caps are not translated: they are in Latin letters on the
    keyboard anyway, and "Leertaste" instead of Space would have to be
    hunted for. */
+/* three columns by meaning: moving through the episode, sound and the next one, the window */
 const KEYS_UI = [
-  [['Space', 'K'],   'keys.play'],
-  [['←', '→'],       'keys.seek5'],
-  [['⇧ ←', '⇧ →'],   'keys.seek1'],
-  [['J', 'L'],       'keys.seek10'],
-  [['↑', '↓'],       'keys.volume'],
-  [['0–9'],          'keys.jump'],
-  [['Home', 'End'],  'keys.edges'],
-  [['B', 'N'],       'keys.nextPrev'],
-  [['M'],            'keys.mute'],
-  [['P'],            'keys.pip'],
-  [['F'],            'keys.full'],
-  [['Q'],            'keys.queue'],
-  [['Esc'],          'keys.esc'],
+  [
+    [['Space', 'K'],   'keys.play'],
+    [['←', '→'],       'keys.seek5'],
+    [['Shift ←', 'Shift →'], 'keys.seek1'],
+    [['J', 'L'],       'keys.seek10'],
+    [['0–9'],          'keys.jump'],
+    [['Home', 'End'],  'keys.edges'],
+  ], [
+    [['↑', '↓'],       'keys.volume'],
+    [['M'],            'keys.mute'],
+    [['B', 'N'],       'keys.nextPrev'],
+  ], [
+    [['P'],            'keys.pip'],
+    [['F'],            'keys.full'],
+    [['Q'],            'keys.queue'],
+    [['Esc'],          'keys.esc'],
+  ],
 ];
 
 /* ── the cache row ───────────────────────────────────────────
@@ -1824,6 +2669,16 @@ function playingKey() {
 }
 
 const GB = 1024 ** 3;
+
+/* What the server said last about the cache and the folder, kept, so
+   the sheet is drawn whole the moment it opens and never waits for an
+   answer under the eye; each opening asks again in the background and
+   repaints only when something changed. The first answers are fetched
+   at boot. */
+const known = { home: null, cache: null };
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const askHome = () => api('/api/home').then(d => { const changed = !same(known.home, d); known.home = d; return changed; });
+const askCache = () => api('/api/cache').then(d => { const changed = !same(known.cache, d); known.cache = d; return changed; });
 
 function cacheRow(col) {
   const line = document.createElement('div');
@@ -1869,10 +2724,11 @@ function cacheRow(col) {
                      : d.free == null ? '' : t('set.cacheFree', { size: fmtSize(d.free) });
     clear.disabled = !d.files;
   };
-  const take = answer => { d = answer; limitGb = Math.round(d.limit / GB); paint(); };
+  const take = answer => { d = answer; known.cache = answer; limitGb = Math.round(d.limit / GB); paint(); };
 
-  fetch('/api/cache').then(r => r.json()).then(take)
-    .catch(() => { size.textContent = t('set.cacheFail'); });
+  if (known.cache) take(known.cache);
+  askCache().then(changed => { if (changed || !d) take(known.cache); })
+    .catch(() => { if (!d) size.textContent = t('set.cacheFail'); });
 
   const gbAt = ratio => Math.min(hiGb(), Math.max(loGb(), Math.round(ratio * scale() / GB)));
   let sent = null;
@@ -1923,33 +2779,96 @@ function cacheRow(col) {
 }
 
 /* ── the Lapka folder ───────────────────────────────────────────
-   Where everything is kept. Shown as it is; a new path typed here is
-   created if it does not exist and taken into use at once. */
+   Where everything is kept, and what it weighs apart from the cache:
+   the files saved and Lapka's notes. The path is shown as it is; a new
+   path typed here is created if it does not exist and taken into use at
+   once. Three kinds of things live in the folder and each is cleared on
+   its own: the cache in its row, the saved files and the notes here,
+   each by a quiet button that asks on the first click and acts on the
+   second. */
 function homeRow(col) {
+  /* the folder: where, how much in all, the way to another one */
   const line = document.createElement('div');
   line.className = 'menu__row';
   line.innerHTML =
-    '<div class="cache__head"><span class="menu__rowlabel"></span></div>' +
+    '<div class="cache__head"><span class="menu__rowlabel"></span><span class="cache__size home__size"></span></div>' +
     '<div class="home__path"></div>' +
-    '<div class="home__acts"><button class="cache__clear home__open"></button><button class="cache__clear home__pick"></button><button class="home__manual"></button></div>' +
+    '<div class="home__acts"><button class="cache__clear home__open"></button><button class="cache__clear home__pick"></button></div>' +
+    '<button class="home__manual"></button>' +
     '<form class="home__form" hidden><input class="linkform__in home__in" spellcheck="false"><button type="submit" class="cache__clear home__go"></button></form>' +
     '<div class="cache__note home__note"></div>';
-  col.append(line);
+  /* the two kinds of things of Lapka's own in it, each said what it is, with its own way out */
+  const part = (cls) => {
+    const row = document.createElement('div');
+    row.className = 'menu__row';
+    row.innerHTML = `<span class="menu__rowlabel"></span><div class="home__part"><div class="home__what"><div class="cache__note home__why"></div><div class="home__count"></div></div><button class="btn btn--quiet ${cls}"></button></div>`;
+    return row;
+  };
+  const videos = part('home__files'), notes = part('home__notes');
+  col.append(line, videos, notes);
   const q = s => line.querySelector(s);
   q('.menu__rowlabel').textContent = t('set.home');
+  videos.querySelector('.menu__rowlabel').textContent = t('set.homeVideos');
+  notes.querySelector('.menu__rowlabel').textContent = t('set.homeNotesHead');
   q('.home__open').textContent = t('set.homeOpen');
   q('.home__pick').textContent = t('set.homePick');
   q('.home__manual').textContent = t('set.homeManual');
   q('.home__go').textContent = t('set.homeChange');
   q('.home__in').placeholder = t('set.homePlaceholder');
-  const paint = d => {
+
+  let d = null;          // the last answer from the server
+  const files = videos.querySelector('.home__files'), forget = notes.querySelector('.home__notes');
+  const paint = answer => {
+    d = answer;
     q('.home__path').textContent = d.home;
+    /* the folder in all: the files, the notes and the cache together */
+    q('.home__size').textContent = fmtSize((d.bytes || 0) + ((d.cache && d.cache.bytes) || 0));
     q('.home__pick').hidden = !d.canPick;
     q('.home__open').hidden = !d.canOpen;
     q('.home__note').textContent = d.canPick ? '' : t('set.homeHint');
     if (!d.canPick) { q('.home__form').hidden = false; q('.home__manual').hidden = true; }
+    videos.querySelector('.home__why').textContent = t('set.homeVideosNote');
+    videos.querySelector('.home__count').textContent = t('set.homeVideosCount', { n: d.files, size: fmtSize(d.filesBytes || 0) });
+    notes.querySelector('.home__why').textContent = t('set.homeNotesNote');
+    notes.querySelector('.home__count').textContent = t('set.homeNotesCount', { n: d.notes, size: fmtSize(d.notesBytes || 0) });
+    files.disabled = !d.files; forget.disabled = !d.notes;
+    paintQuiet();
   };
-  fetch('/api/home').then(r => r.json()).then(paint).catch(() => { q('.home__path').textContent = '—'; });
+  const paintQuiet = () => {
+    if (!d) return;
+    files.textContent = files.classList.contains('is-armed') ? t('pop.deleteSure', { n: d.files }) : t('set.homeDelete');
+    forget.textContent = forget.classList.contains('is-armed') ? t('set.homeNotesSure') : t('set.homeDelete');
+  };
+  const reload = () => askHome().then(changed => { if (changed || !d) paint(known.home); })
+    .catch(() => { if (!d) { q('.home__path').textContent = '—'; q('.home__size').textContent = ''; } });
+  if (known.home) paint(known.home);
+  reload();
+
+  /* the first click asks, the second acts; the question goes away on its own */
+  const arm = (b, run) => async ev => {
+    ev.stopPropagation();
+    if (b.classList.contains('is-armed')) {
+      b.classList.remove('is-armed'); b.disabled = true;
+      try { await run(); } catch (e) { toast(t('toast.homeFail', { why: e.message })); }
+      await reload();
+      return;
+    }
+    b.classList.add('is-armed'); paintQuiet();
+    clearTimeout(b._arm); b._arm = setTimeout(() => { b.classList.remove('is-armed'); paintQuiet(); }, 4000);
+  };
+  files.onclick = arm(files, async () => {
+    const r = await post('/api/library/clear');
+    toast(t('toast.deleted', { n: r.removed }));
+    loadLibrary();                       // the rows lose their saved marks
+  });
+  forget.onclick = arm(forget, async () => {
+    await post('/api/state/forget');
+    state.positions = {}; state.watched = {};
+    if (state.remote) state.remote.dubs = {};
+    paintMeta();                         // the bars and the veils go
+    toast(t('toast.forgot'));
+  });
+
   const took = r => {
     toast(t(r.created ? 'toast.homeCreated' : 'toast.homeSet', { path: r.home }));
     buildGearMenu(); gearMenu.classList.add('open');
@@ -1987,41 +2906,173 @@ function homeRow(col) {
   });
   /* typing in the field must not seek the video */
   q('.home__in').addEventListener('keydown', ev => ev.stopPropagation());
-  line.addEventListener('click', ev => ev.stopPropagation());
+  for (const el of [line, videos, notes]) el.addEventListener('click', ev => ev.stopPropagation());
 }
 
 /* Three columns: keys, settings, languages. Languages need only a
    narrow strip, one word per row; keys need one of their own, because a
    caption next to a key reads only when both are on the same line. The
    widths live in menu--gear, this is the content alone. */
+/* ── the settings ─────────────────────────────────────────────
+   One sheet, three columns and a band: the state of the server with
+   the way out and the interface on the left, the player in the middle,
+   the storage on the right, the keys along the bottom. The server is
+   asked how it is while the sheet is open. */
+let serverState = 'checking';         // up | down | off | checking
+let serverPlatform = '';              // darwin | win32 | linux: which launcher the stop notice names
+let serverVersion = '';               // "1.1.0", as the package says; shown as v1.1
+async function checkServer() {
+  if (serverState === 'off' || serverState === 'updating') return paintStatus();
+  try { const p = await api('/api/ping'); serverState = 'up'; if (p.version) serverVersion = p.version; if (p.platform) serverPlatform = p.platform; } catch (_) { serverState = 'down'; }
+  paintStatus();
+}
+/* "v1.1.0", as the tag on GitHub reads */
+const shortVersion = v => v ? 'v' + String(v) : '';
+
+/* ── the update ────────────────────────────────────────────────
+   One row: the version as a heading, a word about the state under it,
+   and one button the width of the column that does the next thing:
+     idle        —                          [Check for an update]
+     checking    —                          [Checking…] (disabled)
+     latest      "the latest"               [Check again]
+     newer       "v1.1.0 is available"      [Update to v1.1.0]
+     updating    the steps, one per line    (no button: nothing to press)
+     restarting  "starting again…"          (no button)
+     done        "updated to v1.1.0"        [Reload the page]
+     failed      what went wrong            [Check again]
+   The state outlives the sheet, which is rebuilt on every opening. */
+const update = { phase: 'idle', latest: null, tag: null, why: '', steps: [] };
+function paintUpdate() {
+  const row = gearMenu.querySelector('.upd');
+  if (!row) return;
+  const head = row.querySelector('.upd__head'), note = row.querySelector('.upd__note'), log = row.querySelector('.upd__log'), btn = row.querySelector('.upd__btn');
+  head.textContent = t('set.version', { v: shortVersion(serverVersion) || '…' });
+  const v = shortVersion(update.latest);
+  const show = (noteText, btnText, { disabled = false } = {}) => { note.textContent = noteText; btn.hidden = !btnText; btn.textContent = btnText || ''; btn.disabled = disabled; };
+  log.replaceChildren();
+  switch (update.phase) {
+    case 'checking': show('', t('upd.checking'), { disabled: true }); break;
+    case 'latest': show(t('upd.latest'), t('upd.again')); break;
+    case 'newer': show(t('upd.available', { v }), t('upd.to', { v })); break;
+    case 'npx': show(t('upd.npx', { v }), t('upd.again')); break;
+    case 'desktop': show(t('upd.desktop', { v }), t('upd.again')); break;
+    case 'updating': show(t('upd.updating', { v }), ''); for (const s of update.steps) { const d = document.createElement('div'); d.textContent = stepText(s); log.append(d); } break;
+    case 'restarting': show(t('upd.waiting'), ''); break;
+    case 'done': show(t('upd.done', { v }), t('upd.reload')); break;
+    case 'failed': show(t('upd.failed', { why: update.why }), t('upd.again')); break;
+    default: show('', t('upd.check'));
+  }
+}
+async function updateClick() {
+  if (update.phase === 'done') { location.reload(); return; }
+  if (update.phase === 'newer') return startUpdate();
+  if (update.phase === 'checking' || update.phase === 'updating' || update.phase === 'restarting') return;
+  update.phase = 'checking'; paintUpdate();
+  try {
+    const r = await post('/api/update/check');
+    update.latest = r.latest; update.tag = r.tag; update.kind = r.kind;
+    update.phase = r.newer ? (['npx', 'desktop'].includes(r.kind) ? r.kind : 'newer') : 'latest';
+  } catch (e) { update.phase = 'failed'; update.why = e.message; }
+  paintUpdate();
+}
+async function startUpdate() {
+  update.phase = 'updating'; update.steps = []; serverState = 'updating'; paintStatus(); paintUpdate();
+  let token;
+  try { token = (await post('/api/update/start?tag=' + encodeURIComponent(update.tag || ''))).token; }
+  catch (e) { update.phase = 'failed'; update.why = e.message; paintUpdate(); return; }
+  const es = new EventSource('/api/update/live?token=' + encodeURIComponent(token));
+  es.addEventListener('step', e => { try { update.steps.push(JSON.parse(e.data)); } catch (_) {} paintUpdate(); });
+  es.addEventListener('fail', e => { es.close(); let d = {}; try { d = JSON.parse(e.data); } catch (_) {} update.phase = 'failed'; update.why = d.key ? t('upd.err.' + d.key) : d.error || 'update failed'; serverState = 'up'; paintStatus(); paintUpdate(); });
+  es.addEventListener('done', () => { es.close(); update.phase = 'restarting'; paintUpdate(); awaitRestart(); });
+  es.onerror = () => { if (update.phase === 'updating') { es.close(); update.phase = 'failed'; update.why = t('set.cacheFail'); serverState = 'up'; paintStatus(); paintUpdate(); } };
+}
+/* Lapka is gone and comes back: the new one answers with the new version */
+function awaitRestart() {
+  const began = Date.now();
+  const tick = async () => {
+    try {
+      const p = await api('/api/ping');
+      if (p.version && (!update.latest || p.version === update.latest)) { serverVersion = p.version; serverState = 'up'; update.phase = 'done'; paintStatus(); paintUpdate(); return; }
+    } catch (_) { /* still away */ }
+    if (Date.now() - began > 180000) { update.phase = 'failed'; update.why = t('upd.lost'); serverState = 'down'; paintStatus(); paintUpdate(); return; }
+    setTimeout(tick, 1000);
+  };
+  setTimeout(tick, 1500);
+}
+function paintStatus() {
+  const row = gearMenu.querySelector('.status');
+  if (!row) return;
+  row.querySelector('.status__dot').className = 'status__dot is-' + serverState;
+  row.querySelector('.status__label').textContent = t('set.status.' + serverState);
+}
+setInterval(() => { if (gearMenu.classList.contains('open')) checkServer(); }, 4000);
+
 function buildGearMenu() {
   gearMenu.replaceChildren();
-  gearMenu.classList.add('menu--split', 'menu--gear');
 
-  const keys = document.createElement('div');
-  keys.className = 'menu__col menu__col--keys';
-  menuTitle(keys, t('keys.head'));
-  for (const [caps, key] of KEYS_UI) {
-    const row = document.createElement('div');
-    row.className = 'keys__row';
-    const box = document.createElement('span');
-    box.className = 'keys__caps';
-    for (const c of caps) {
-      const k = document.createElement('kbd');
-      k.textContent = c;
-      box.append(k);
+  /* ─ left: how Lapka is, the way out, the interface ─ */
+  const left = document.createElement('div');
+  left.className = 'menu__col menu__col--left';
+  const status = document.createElement('div');
+  status.className = 'menu__row status';
+  status.innerHTML = '<div class="status__head"><i class="status__dot"></i><span class="menu__rowlabel status__label"></span></div>';
+  /* two paragraphs: what Lapka is and what the button does, then how to start it again */
+  const quitNote = document.createElement('div');
+  quitNote.className = 'cache__note quit__note';
+  quitNote.textContent = t('set.quitNote');
+  const quitStart = document.createElement('div');
+  quitStart.className = 'cache__note quit__note';
+  quitStart.textContent = t('set.quitStart');
+  const quitGuide = document.createElement('a');
+  quitGuide.className = 'quit__guide';
+  quitGuide.target = '_blank'; quitGuide.rel = 'noopener';
+  quitGuide.href = lang === 'ru' ? 'https://github.com/MythHand/Lapka/blob/main/docs/INSTALL.ru.md#как-выключить' : 'https://github.com/MythHand/Lapka/blob/main/docs/INSTALL.md#how-to-stop';
+  quitGuide.textContent = t('set.quitGuide');
+  quitGuide.onclick = ev => ev.stopPropagation();
+  const quit = document.createElement('button');
+  quit.className = 'cache__clear quit';
+  quit.textContent = t('set.quit');
+  quit.onclick = async ev => {
+    ev.stopPropagation();
+    if (!quit.classList.contains('is-armed')) {
+      quit.classList.add('is-armed'); quit.textContent = t('set.quitSure');
+      setTimeout(() => { quit.classList.remove('is-armed'); quit.textContent = t('set.quit'); }, 4000);
+      return;
     }
-    const what = document.createElement('span');
-    what.className = 'keys__what';
-    what.textContent = t(key);
-    row.append(box, what);
-    keys.append(row);
-  }
+    /* the place where watching is goes first, at once: the server is about to end */
+    if (loaded && video.currentTime) { video.pause(); markPos(loaded, video.currentTime, 'now'); await sleep(150); }
+    try { await post('/api/quit'); } catch (_) {}
+    serverState = 'off';
+    closeMenus();
+    video.pause();
+    showNotice(t('notice.quitHead'), { mid: true, more: startAgain() });
+  };
+  status.append(quitNote, quitStart, quitGuide, quit);
+  left.append(status);
+  paintStatus(); checkServer();
 
-  const opts = document.createElement('div');
-  opts.className = 'menu__col';
-  menuTitle(opts, t('set.head'));
-  /* the language first: chips as wide as their names */
+  /* the version, and the way to the next one: asked for on the button, never on its own */
+  const upd = document.createElement('div');
+  upd.className = 'menu__row upd';
+  upd.innerHTML = '<span class="menu__rowlabel upd__head"></span><div class="cache__note upd__note"></div><div class="upd__log"></div><button class="cache__clear upd__btn"></button>';
+  upd.querySelector('.upd__btn').onclick = ev => { ev.stopPropagation(); updateClick(); };
+  upd.addEventListener('click', ev => ev.stopPropagation());
+  left.append(upd);
+
+  /* ─ second: the interface ─ */
+  const ui = document.createElement('div');
+  ui.className = 'menu__col menu__col--ui';
+  menuTitle(ui, t('set.iface'));
+  const iface = SETTINGS.filter(r => r.key === 'queueMode' || r.key === 'font' || r.key === 'histLinks');
+  const settingRow = (col, row) => segRow(col, t(row.label), state.set[row.key],
+    row.opts.map(([val, key]) => [val, t(key)]), val => {
+      state.set[row.key] = val;
+      try { localStorage.setItem('lapka.' + row.key, val); } catch (_) {}
+      applySettings();
+    });
+  settingRow(ui, iface.find(r => r.key === 'queueMode'));
+  settingRow(ui, iface.find(r => r.key === 'histLinks'));   // the links as pasted, shown in the history list or not
+  /* the language: chips as wide as their names */
   const langRow = document.createElement('div');
   langRow.className = 'menu__row';
   const langLab = document.createElement('span');
@@ -2042,72 +3093,70 @@ function buildGearMenu() {
     chips.append(b);
   }
   langRow.append(langLab, chips);
-  opts.append(langRow);
-  for (const row of SETTINGS) {
-    segRow(opts, t(row.label), state.set[row.key],
-           row.opts.map(([val, key]) => [val, t(key)]), val => {
-      state.set[row.key] = val;
-      try { localStorage.setItem('lapka.' + row.key, val); } catch (_) {}
-      applySettings();
-    });
-  }
+  ui.append(langRow);
+  settingRow(ui, iface.find(r => r.key === 'font'));
+
+  /* ─ middle: the player ─ */
+  const player = document.createElement('div');
+  player.className = 'menu__col menu__col--player';
+  menuTitle(player, t('set.head'));
+  for (const row of SETTINGS) if (!iface.includes(row)) settingRow(player, row);
+  switchRow(player, t('set.autoResume'), (state.remote.settings?.autoResume || 'on') !== 'off', on => {
+    state.remote.settings = { ...(state.remote.settings || {}), autoResume: on ? 'on' : 'off' };
+    post('/api/state/setting?k=autoResume&v=' + (on ? 'on' : 'off')).then(() => { if (on) post('/api/saves/resume').catch(() => {}); }).catch(() => {});
+  });
+  switchRow(player, t('set.prefetch'), prefetchOn(), on => {
+    state.remote.settings = { ...(state.remote.settings || {}), prefetch: on ? 'on' : 'off' };
+    post('/api/state/setting?k=prefetch&v=' + (on ? 'on' : 'off')).then(() => { if (on) warmCurrent(); else post('/api/warm/stop').catch(() => {}); }).catch(() => {});
+  });
+
+  /* ─ right: the storage ─ */
   const place = document.createElement('div');
   place.className = 'menu__col menu__col--place';
   menuTitle(place, t('set.place'));
   homeRow(place);
   cacheRow(place);
-  /* how episodes are saved */
-  const saveQ = state.remote.settings?.saveQuality || 'auto';
-  segRow(place, t('set.saveQuality'), saveQ, [['auto', t('quality.auto')], ['1080p', '1080p'], ['720p', '720p'], ['480p', '480p'], ['360p', '360p']], val => {
-    state.remote.settings = { ...(state.remote.settings || {}), saveQuality: val };
-    post('/api/state/setting?k=saveQuality&v=' + val).catch(() => {});
-  });
-  switchRow(place, t('set.autoResume'), (state.remote.settings?.autoResume || 'on') !== 'off', on => {
-    state.remote.settings = { ...(state.remote.settings || {}), autoResume: on ? 'on' : 'off' };
-    post('/api/state/setting?k=autoResume&v=' + (on ? 'on' : 'off')).then(() => { if (on) post('/api/saves/resume').catch(() => {}); }).catch(() => {});
-  });
-  /* the way out: a block like the others, with its heading, what it is and why, the
-     guide on GitHub in the reader's language, and the button; the first click only arms it */
-  const quitRow = document.createElement('div');
-  quitRow.className = 'menu__row menu__row--quit';
-  const quitHead = document.createElement('span');
-  quitHead.className = 'menu__rowlabel';
-  quitHead.textContent = t('set.quitHead');
-  const quitNote = document.createElement('div');
-  quitNote.className = 'cache__note quit__note';
-  quitNote.textContent = t('set.quitNote');
-  const quitGuide = document.createElement('a');
-  quitGuide.className = 'quit__guide';
-  quitGuide.target = '_blank'; quitGuide.rel = 'noopener';
-  quitGuide.href = lang === 'ru' ? 'https://github.com/MythHand/Lapka/blob/main/docs/INSTALL.ru.md#как-выключить' : 'https://github.com/MythHand/Lapka/blob/main/docs/INSTALL.md#how-to-stop';
-  quitGuide.textContent = t('set.quitGuide');
-  quitGuide.onclick = ev => ev.stopPropagation();
-  const quit = document.createElement('button');
-  quit.className = 'cache__clear quit';
-  quit.textContent = t('set.quit');
-  quit.onclick = async ev => {
-    ev.stopPropagation();
-    if (!quit.classList.contains('is-armed')) {
-      quit.classList.add('is-armed'); quit.textContent = t('set.quitSure');
-      setTimeout(() => { quit.classList.remove('is-armed'); quit.textContent = t('set.quit'); }, 4000);
-      return;
-    }
-    try { await post('/api/quit'); } catch (_) {}
-    closeMenus();
-    video.pause();
-    showNotice(t('notice.quit'), { mid: true });
-  };
-  quitRow.append(quitHead, quitNote, quitGuide, quit);
-  place.append(quitRow);
 
-  gearMenu.append(keys, opts, place);
+  /* ─ the band: the keys, in columns across the whole width ─ */
+  const keys = document.createElement('div');
+  keys.className = 'menu__band menu__band--keys';
+  menuTitle(keys, t('keys.head'));
+  const grid = document.createElement('div');
+  grid.className = 'keys__grid';
+  for (const group of KEYS_UI) {
+    const col = document.createElement('div');
+    col.className = 'keys__col';
+    for (const [caps, key] of group) {
+      const row = document.createElement('div');
+      row.className = 'keys__row';
+      const box = document.createElement('span');
+      box.className = 'keys__caps';
+      for (const c of caps) {
+        const k = document.createElement('kbd');
+        k.textContent = c;
+        box.append(k);
+      }
+      const what = document.createElement('span');
+      what.className = 'keys__what';
+      what.textContent = t(key);
+      row.append(box, what);
+      col.append(row);
+    }
+    grid.append(col);
+  }
+  keys.append(grid);
+
+  gearMenu.append(left, ui, player, place, keys);
+  paintStatus(); paintUpdate();      // the rows are in the sheet now: painted from what is known
 }
 
 btnGear.onclick = e => {
   e.stopPropagation();
   buildGearMenu();
   closeMenus(gearMenu);
+  const opening = !gearMenu.classList.contains('open');
   gearMenu.classList.toggle('open');
+  if (opening) pressGearPaw();
 };
 
 btnSubs.onclick = e => {
@@ -2137,6 +3186,17 @@ btnAudio.onclick = e => {
   closeMenus(audioMenu);
   audioMenu.classList.toggle('open');
 };
+/* With a menu of the deck open, a click anywhere outside it closes it and
+   does nothing else, as a click on the picture does: the button under the
+   pointer (the queue's, a control's) does not act on that click. Inside a
+   menu's wrap the click goes on: the menu's own button toggles it, another
+   menu's button switches. */
+document.addEventListener('click', e => {
+  if (!panelOpen() || e.target.closest('.menuwrap, #deckPack')) return;
+  e.stopPropagation(); e.preventDefault();
+  justClosed = Date.now();
+  closeMenus(); closePack(); closePipMenus();
+}, true);
 document.addEventListener('click', e => {
   if (!e.target.closest('.menuwrap')) closeMenus();
   if (!e.target.closest('#deckPack')) closePack();
@@ -2150,8 +3210,47 @@ let noticeDo = null, noticeUndo = null, noticeKind = null;
    spinner, so a pause never reads as a dead player */
 /* mid: the line stands in the middle of the picture, where a question is
    seen at once; a busy line always stands there */
-function showNotice(text, { action = null, onAction = null, onClose = null, kind = null, busy = false, mid = false } = {}) {
+/* ── the diary of playback ─────────────────────────────────────
+   The last events of the player, kept in memory: an episode asked for,
+   the server's answer and how long it took, what hls.js reported, what
+   the video element did, a refused play(). Nothing leaves the page
+   unless a wait does not end: a busy notice that stands for half a
+   minute sends the diary to the journal beside the settings, once per
+   such wait, so a hang can be read later. Names of players and dubs
+   go; addresses never do. */
+const DIARY_KEEP = 60, STALL_MS = Number(new URLSearchParams(location.search).get('stallMs')) || 30000;   // ?stallMs= shortens the wait for a check
+const diaryLines = [];
+let diaryT0 = performance.now(), stallWatchT = 0, stallSent = false;
+function diary(what, more = '') {
+  const at = ((performance.now() - diaryT0) / 1000).toFixed(1).padStart(7);
+  diaryLines.push(`${at}s ${what}${more ? ' ' + more : ''}`);
+  if (diaryLines.length > DIARY_KEEP) diaryLines.shift();
+}
+function stallWatch(on) {
+  if (!on) { clearTimeout(stallWatchT); stallWatchT = 0; stallSent = false; return; }
+  if (stallWatchT) return;                       // counted from the first busy notice, not from its every repaint
+  stallWatchT = setTimeout(() => {
+    stallWatchT = 0;
+    if (!notice.classList.contains('show') || noticeKind !== 'busy' || stallSent) return;
+    stallSent = true;
+    diary('stall', `${STALL_MS / 1000}s with the busy notice up; readyState ${video.readyState} paused ${video.paused} networkState ${video.networkState}`);
+    sendDiary('playback stalled');
+  }, STALL_MS);
+}
+/* The diary to the journal, headed by what happened and where: the moment itself first
+   (where the player stands, what it holds, which stream and quality, what the band said
+   was on the disk), then the lines kept. Sent at a wait that does not end and at a mend. */
+let bufferErrAt = -1e9;   // when hls.js last reported the buffer refusing a piece
+function sendDiary(what) {
+  const it = cur();
+  const buf = []; for (let i = 0; i < video.buffered.length; i++) buf.push(`${video.buffered.start(i).toFixed(1)}-${video.buffered.end(i).toFixed(1)}`);
+  diary('state', `at ${video.currentTime.toFixed(1)}s of ${(duration() || 0).toFixed(1)}s, buffered ${buf.join(' ') || 'nothing'}, stream ${it && it.stream ? `${it.stream.id} ${it.stream.kind} ${it.stream.quality || ''}` : 'none'}, loaded ${it && it.loadedSrc === (it.stream && it.stream.play) ? 'this' : 'other'}, hls level ${hls ? `${hls.currentLevel} of ${hls.levels ? hls.levels.length : '?'}${hls.autoLevelEnabled ? ' auto' : ''}` : 'none'}, wanted ${warmLevel() || 'auto'}p`);
+  diary('disk', lastDisk ? `${lastDisk.tag || '?'}: ${(lastDisk.ranges || []).map(([a, b]) => `${Math.round(a)}-${Math.round(b)}`).join(' ') || 'nothing'} of ${Math.round(lastDisk.duration || 0)}s` : 'not read');
+  api('/api/log', { method: 'POST', body: JSON.stringify({ head: `${what}: episode ${it ? it.number : '?'}, player ${(it && it.source && it.source.player) || '?'}, dub ${(it && it.dub && it.dub.name) || '?'}`, lines: diaryLines, stream: it && it.stream ? it.stream.id : null, level: warmLevel() || null }), headers: { 'x-lapka': '1', 'content-type': 'application/json' } }).catch(() => {});
+}
+function showNotice(text, { action = null, onAction = null, onClose = null, kind = null, busy = false, mid = false, more = null } = {}) {
   noticeText.textContent = text;
+  if (more) noticeText.append(more);
   const btn = $('#noticeAction');
   btn.hidden = !action;
   btn.textContent = action || '';
@@ -2159,20 +3258,53 @@ function showNotice(text, { action = null, onAction = null, onClose = null, kind
   notice.classList.toggle('notice--busy', busy);
   notice.classList.toggle('notice--mid', busy || mid);
   notice.classList.add('show');
+  diary('notice', `${kind || 'plain'}: ${text.slice(0, 60)}`);
+  if (kind === 'busy') stallWatch(true);
+}
+/* How to start Lapka again, told whole for the system it runs on: through
+   npx, and from the folder it was downloaded to (the launcher of this
+   system, then npm start). Each way says which install it belongs to: npx
+   typed by one who downloaded the folder would start another Lapka, with
+   another folder of its own. Commands stand in the mono face. */
+function startAgain() {
+  const said = (key, cmd) => {
+    const [a, b = ''] = t(key, { cmd: '\u0001', file: '\u0001' }).split('\u0001');
+    const line = document.createDocumentFragment();
+    line.append(a); if (cmd) { line.append(el('code', 'notice__cmd', cmd), b); }
+    return line;
+  };
+  const item = (lines) => {
+    const li = el('div', 'notice__way');
+    lines.forEach((l, i) => { const row = el('div'); row.append(l, i < lines.length - 1 ? ',' : ''); li.append(row); });
+    return li;
+  };
+  const folder = serverPlatform === 'win32'
+    ? [said('notice.quitClick', 'start.bat'), said('notice.quitOrHere', 'npm start')]
+    : serverPlatform === 'linux'
+      ? [said('notice.quitThere', './start.sh'), said('notice.quitOrHere', 'npm start')]
+      : [said('notice.quitClick', 'start.command'), said('notice.quitOrHere', './start.command'), said('notice.quitOrHere', 'npm start')];
+  const first = document.createDocumentFragment(); first.append(t('notice.quitFolder') + ' ', folder[0]);
+  const how = el('div', 'notice__how');
+  how.append(el('div', 'notice__howhead', t('notice.quitHow')), item([said('notice.quitNpx', 'npx -y lapka')]), item([first, ...folder.slice(1)]));
+  return how;
 }
 function hideNotice(kind = null) {
   if (kind && noticeKind !== kind) return;   // another line is up: leave it
+  if (noticeKind === 'busy') stallWatch(false);
   notice.classList.remove('show', 'notice--busy', 'notice--mid'); noticeDo = null; noticeUndo = null; noticeKind = null;
 }
 /* the busy lines: what is being opened, a source that is slow to answer */
 let loadingT = 0, stallT = 0;
 function sayLoading(it) {
   clearTimeout(loadingT);
+  if (it.stream && it.stream.local) return;   // a file from the disk has no source to wait for
   loadingT = setTimeout(() => { if (it === cur() && !it.switching && video.paused === false && video.readyState < 3) showNotice(t('notice.loading', { name: it.name, player: (it.source && it.source.player) || '' }), { kind: 'busy', busy: true }); }, 1500);
 }
 function sayStalled(it) {
   clearTimeout(stallT);
-  stallT = setTimeout(() => { if (it === cur() && !it.switching && video.readyState < 3) showNotice(t('notice.slow', { player: (it.source && it.source.player) || '' }), { kind: 'busy', busy: true }); }, 2500);
+  if (it.stream && it.stream.local) return;
+  /* a wait right after the buffer refused a piece is the buffer's, not the source's */
+  stallT = setTimeout(() => { if (it === cur() && !it.switching && video.readyState < 3) showNotice(performance.now() - bufferErrAt < 10000 ? t('notice.buffer') : t('notice.slow', { player: (it.source && it.source.player) || '' }), { kind: 'busy', busy: true }); }, 2500);
 }
 function busyOver() { clearTimeout(loadingT); clearTimeout(stallT); hideNotice('busy'); }
 $('#noticeClose').onclick = () => { const f = noticeUndo; hideNotice(); if (f) f(); };
@@ -2336,8 +3468,8 @@ if (btnQueueWidth) btnQueueWidth.onclick = () => {
    by importance to the goal: first what the whole thing was started
    for, then what it cannot work without, and only at the end the
    trimmings. */
-const SITES_OK = ['aniliberty.top', 'old.yummyani.me', 'jut-su.net', 'animego.me', 'anidubonline.ru', 'gogoanime.by', 'jkanime.net', 'newdeaf.co'];
-const SITES_PART = [{ site: 'animeflv.or.at', note: 'about.partOne' }];
+const SITES_OK = ['aniliberty.top', 'old.yummyani.me', 'jut-su.net', 'animego.me', 'anidubonline.ru', 'gogoanime.by', 'jkanime.net', 'newdeaf.co', 'yummyanime.tv', 'ani-media.online', 'domanime.ru', 'lordserials.fan', 'ailiberty.top'];
+const SITES_PART = [{ site: 'animeflv.or.at', note: 'about.partOne' }, { site: 'anitv.ru', note: 'about.partDub' }];
 const SITES_SHUT = ['aniwaves.ru', 'aniwatch.co.at'];
 /* The left side while nothing is open: the seal, the state as a
    terminal would say it, what Lapka is in two paragraphs, and the
@@ -2377,7 +3509,7 @@ function aboutBlock() {
     return box;
   };
   const how = section('about.how', [['', 'about.step1'], ['', 'about.step2'], ['', 'about.step3']], true);
-  const can = section('about.can', ['queue', 'dubs', 'quality', 'subs', 'skip', 'resume', 'save', 'finish', 'sources'].map(k => [`about.f.${k}.k`, `about.f.${k}`]));
+  const can = section('about.can', ['queue', 'dubs', 'dubmap', 'quality', 'subs', 'skip', 'resume', 'pause', 'watched', 'history', 'save', 'finish', 'folder', 'sources', 'log'].map(k => [`about.f.${k}.k`, `about.f.${k}`]));
   const rules = section('about.rules', ['local', 'fair', 'general', 'doors', 'open'].map(k => [`about.p.${k}.k`, `about.p.${k}`]));
 
   const doors = el('section', 'about__section about__doors');
@@ -2424,7 +3556,6 @@ function rowFor(it) {
     `<span class="item__grip">${phSvg(PH.grip)}</span>` +
     `<span class="item__thumb"><span class="item__eq"><i></i><i></i><i></i></span><span class="pos"><i></i></span></span>` +
     `<span class="item__body"><span class="item__name"></span><span class="item__meta"></span></span>` +
-    `<span class="item__unsave" title="${t('queue.cancelSave')}">${phSvg(PH.x)}</span>` +
     `<span class="item__save">${phSvg(PH.download)}</span>` +
     `<span class="item__x" title="${t('queue.remove')}">${phSvg(PH.x)}</span>`;
   li.querySelector('.item__name').textContent = it.name;
@@ -2495,8 +3626,10 @@ function paintMeta() {
     /* one dub is named; several are counted */
     if (it.dubs && it.dubs.length === 1) rest.push(escapeHtml(it.dubs[0].name));
     else if (it.dubs && it.dubs.length) rest.push(t('queue.dubs', { n: it.dubs.length }));
-    if (it.stream) rest.push(`<span class="route">${it.stream.kind.toUpperCase()}${it.stream.quality ? ' ' + it.stream.quality : ''}</span>`);
-    if (it.source) rest.push(`<span class="route route--off">${it.source.player}</span>`);
+    if (it.stream) rest.push(`<span class="route">${it.stream.local ? t('audio.disk') : it.stream.kind.toUpperCase()}${it.stream.quality ? ' ' + it.stream.quality : ''}</span>`);
+    /* the sources of the dub in play, counted as the dub menu counts them */
+    const dubOf = it.dubs && it.dub ? it.dubs.find(d => d.key === it.dub.key) : null;
+    if (dubOf) rest.push(`<span class="route route--off">${dubOf.alive ? t('audio.sources', { n: dubOf.alive }) : dubOf.sources ? t('audio.dead') : ''}</span>`);
     box.innerHTML = fixed + rest.map(b => `<span>${b}</span>`).join('');
   }
 }
@@ -2507,7 +3640,6 @@ queueList.addEventListener('click', e => {
   const it = byId(li.dataset.id);
   if (!it) return;
   if (e.target.closest('.item__x')) return removeItem(it);
-  if (e.target.closest('.item__unsave')) return cancelSaves([it]);
   if (e.target.closest('.item__save')) return saveMarkClick(it, e.target.closest('.item__save'));
   playItem(it, true, false);
 });
@@ -2536,35 +3668,223 @@ function saveMarkClick(it, btn) {
   if (sv && (sv.st === 'paused' || sv.st === 'failed')) return enqueueSaves([it]);
   return offerSave(it, btn);
 }
+/* The save of one row: which dub, in which quality. Built as the dub
+   menu is: a row per dub, the qualities it can be saved in as tags on
+   the right, four to a line, the dub playing first (first is the whole
+   mark: the player shows it already), the rest in their order. Only a
+   tag chooses: it names the dub and the quality both, and a row on its
+   own would leave the quality unsaid. What each dub offers is asked of
+   the server once per episode, levels of adaptive streams included; the
+   dub playing shows what this page already knows at once, a dub whose
+   sources are not open yet shows a waiting tag, and the window is drawn
+   again when the answer comes. No "auto": a file is saved in one
+   quality, so an adaptive stream is offered as its levels, and one of
+   unknown height by what it is.
+   The window opens from a row's mark and closes on a click anywhere
+   else, on Esc, or on a choice; the click that closes it does nothing
+   else, as with the queue's popover. */
+let saveInfo = null;   // { key, dubs }: what the server says the dubs of one row can be saved in
+let saveMenuFor = null;   // what the window is open for: a row, or { scope, items, rep } for a part's pick
+/* what the server says the dubs of a row can be saved in, asked once per
+   episode: first what it knows, then with the sources opened; redraw is
+   called on each answer while the window is still about this row */
+function loadDubs(it, redraw) {
+  const key = `${it.seriesId}/${it.number}`;
+  if (saveInfo && saveInfo.key === key) return;
+  saveInfo = { key, dubs: null };
+  const ask = q => api(`/api/dubs?series=${it.seriesId}&episode=${it.number}${q}`)
+    .then(d => { if (saveInfo && saveInfo.key === key) { saveInfo.dubs = d.dubs; if (!saveMenu.hidden) redraw(); } })
+    .catch(() => {});
+  ask(''); ask('&open=1');
+}
+const dubsKnown = it => saveInfo && saveInfo.key === `${it.seriesId}/${it.number}` ? saveInfo.dubs : null;
 async function offerSave(it, btn) {
   if (!it.streams) { try { await resolveItem(it); } catch (e) { toast(t('toast.openFail', { name: it.name, why: e.message })); return; } }
-  const opts = saveQualities(it);
-  if (opts.length < 2) return enqueueSaves([it], opts[0] && opts[0].stream);
+  /* one dub, one stream of a known quality: nothing to choose */
+  if ((it.dubs || []).length < 2 && it.streams.length === 1 && (it.streams[0].quality || it.streams[0].kind !== 'hls')) return enqueueSaves([it], { ...it.streams[0], dubName: it.dub ? it.dub.name : null });
+  saveMenuFor = it;
+  saveMenu.anchor = btn.getBoundingClientRect();
+  saveMenu.hidden = false;
+  loadDubs(it, () => { if (saveMenuFor === it) buildSaveMenu(it); });
+  buildSaveMenu(it);
+}
+function closeSaveMenu() { saveMenu.hidden = true; saveMenuFor = null; }
+/* the qualities this page knows of the dub playing, before the server has said */
+const tagsFromStreams = streams => {
+  const out = new Map();
+  for (const st of [...(streams || [])].sort((a, b) => streamRank(b) - streamRank(a))) {
+    const label = st.quality || st.kind.toUpperCase();
+    if (!out.has(label)) out.set(label, { id: st.id, quality: st.quality || null, kind: st.kind, player: st.player, level: false });
+  }
+  return [...out.values()];
+};
+const TAGS_PER_LINE = 4;
+const tagLabel = q => q.quality || q.kind.toUpperCase();
+/* one row of the window: the dub's name, a note under it if any, its tags four to a line; empty → a waiting or a dead tag */
+function saveMenuRow(name, sub, qs, onTag, { waiting = true } = {}) {
+  const row = document.createElement('div');
+  row.className = 'menu__item menu__item--dub savemenu__row' + (qs.length ? '' : ' is-quiet');
+  row.innerHTML = '<span class="menu__body"><span class="menu__main"></span><span class="menu__sub" hidden></span></span><span class="menu__tags"></span>';
+  row.querySelector('.menu__main').textContent = name;
+  if (sub) { const s = row.querySelector('.menu__sub'); s.textContent = sub; s.hidden = false; }
+  const tags = row.querySelector('.menu__tags');
+  let line = null;
+  qs.forEach((q, i) => {
+    if (i % TAGS_PER_LINE === 0) { line = document.createElement('span'); line.className = 'menu__tagline'; tags.append(line); }
+    const tg = document.createElement('span');
+    tg.className = 'qtag';
+    tg.textContent = q.label || tagLabel(q);
+    if (q.player) tg.title = [q.player, q.kind.toUpperCase()].filter(Boolean).join(' · ');
+    tg.onclick = ev => { ev.stopPropagation(); onTag(q); };
+    line.append(tg);
+  });
+  if (!qs.length) {
+    const w = document.createElement('span');
+    w.className = 'qtag qtag--wait';
+    w.textContent = waiting ? '…' : t('audio.dead');
+    tags.append(w);
+  }
+  return row;
+}
+/* centred under its button, kept inside the window only; the queue column is no frame for it */
+function placeSaveMenu() {
+  const r = saveMenu.anchor;
+  if (!r) return;
+  const w = saveMenu.offsetWidth, h = saveMenu.offsetHeight;
+  saveMenu.style.top = Math.max(8, Math.min(r.bottom + 6, window.innerHeight - h - 8)) + 'px';
+  saveMenu.style.left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 8)) + 'px';
+}
+function buildSaveMenu(it) {
   saveMenu.replaceChildren();
   menuTitle(saveMenu, t('queue.saveAs'));
-  for (const o of opts) {
-    const b = document.createElement('button');
-    b.className = 'menu__item';
-    b.innerHTML = `<span class="menu__tick"></span><span class="menu__body"><span class="menu__main"></span><span class="menu__sub"></span></span>`;
-    b.querySelector('.menu__main').textContent = o.label;
-    b.querySelector('.menu__sub').textContent = [o.stream.player, o.stream.kind.toUpperCase()].filter(Boolean).join(' · ');
-    b.onclick = ev => { ev.stopPropagation(); saveMenu.hidden = true; enqueueSaves([it], o.stream); };
-    saveMenu.append(b);
+  const known = dubsKnown(it);
+  const nowKey = it.dub ? it.dub.key : state.dubKey;
+  const dubs = known || (it.dubs || []).map(d => ({ key: d.key, name: d.name, qualities: [], unopened: d.alive, alive: d.alive }));
+  const rows = [...dubs].sort((a, b) => (b.key === nowKey) - (a.key === nowKey));
+  for (const d of rows) {
+    const qs = d.qualities && d.qualities.length ? d.qualities : d.key === nowKey ? tagsFromStreams(it.streams) : [];
+    saveMenu.append(saveMenuRow(d.name, '', qs, q => { closeSaveMenu(); enqueueSaves([it], { id: q.id, quality: q.quality || null, level: q.level ? qualityNum(q.quality) : null, kind: q.kind, player: q.player, dubName: d.name }); }, { waiting: !!(d.unopened || !known) }));
   }
-  const r = btn.getBoundingClientRect();
-  saveMenu.hidden = false;
-  saveMenu.style.top = Math.min(r.bottom + 6, window.innerHeight - saveMenu.offsetHeight - 8) + 'px';
-  saveMenu.style.left = Math.max(8, Math.min(r.right - saveMenu.offsetWidth, window.innerWidth - saveMenu.offsetWidth - 8)) + 'px';
+  placeSaveMenu();
 }
-document.addEventListener('click', e => { if (!e.target.closest('#saveMenu') && !e.target.closest('.item__save')) saveMenu.hidden = true; });
+
+/* ── the dub and the quality a part, or the whole queue, is saved in ──
+   Shown in the popover as one line, "AniLibria · 1080p", and applied to
+   its Download button. Until chosen it is the dub playing (else the one
+   most rows have) in the quality the settings prefer. Chosen through
+   the same window as a row's save, with one more thing per dub: how
+   many rows of the part have it, when not all. Quality is size, not
+   content: a row without the exact one gets the nearest. A dub is
+   content: a row known to lack it is not put in line, the popover
+   counts such rows, and their marks stay for a save of their own. A row
+   whose dubs are not known yet (its page unread) goes in line and is
+   settled when it is opened. The choice lives for the page. */
+const groupPicks = new Map();   // '*' for the queue, else the part's id → { dubKey, dubName, quality }
+const scopeKey = scope => scope === null ? '*' : scope;
+const lacksDub = (it, key) => !!it.dubs && !it.dubs.some(d => d.key === key);   // known to have no such dub
+/* every dub seen across the rows, with how many rows have it */
+function dubCoverage(items) {
+  const m = new Map();
+  for (const it of items) for (const d of it.dubs || []) { const e = m.get(d.key) || { key: d.key, name: d.name, n: 0 }; e.n++; m.set(d.key, e); }
+  return [...m.values()];
+}
+function groupPickOf(scope, items) {
+  const own = groupPicks.get(scopeKey(scope));
+  if (own) return own;
+  const cov = dubCoverage(items);
+  const playing = cur();
+  const key = (playing && playing.dub && playing.dub.key) || state.dubKey;
+  const played = cov.find(x => x.key === key), d = played || [...cov].sort((a, b) => b.n - a.n)[0];
+  /* implied, not chosen: the player's own dub when the part has it (said as "as played"), else the part's most common dub, named */
+  return d ? { dubKey: d.key, dubName: d.name, quality: null, implied: true, played: !!played } : null;
+}
+/* the quality of a pick in words: the label chosen, else the settings' rule */
+const qualityWords = quality => quality || ({ max: t('pop.qBest'), played: t('pop.qPlayed') })[saveQualityWanted()] || saveQualityWanted();
+/* the tag of a named quality, else the nearest by height, the taller on a tie */
+function nearestTag(qs, label) {
+  const exact = qs.find(q => tagLabel(q) === label);
+  if (exact) return exact;
+  const target = qualityNum(label), named = qs.filter(q => qualityNum(q.quality));
+  if (!target || !named.length) return qs[0] || null;
+  return [...named].sort((a, b) => Math.abs(qualityNum(a.quality) - target) - Math.abs(qualityNum(b.quality) - target) || qualityNum(b.quality) - qualityNum(a.quality))[0];
+}
+/* the tag the settings' rule picks: the best, the one played, or a named quality */
+function tagByRule(it, qs) {
+  const want = saveQualityWanted();
+  if (want === 'max') return qs[0] || null;
+  if (want === 'played') { const now = (it.stream && it.stream.quality) || (state.quality !== 'auto' ? state.quality : ''); return now ? nearestTag(qs, now) : qs[0] || null; }
+  return nearestTag(qs, want);
+}
+/* the stream of a row for a pick: the dub named, in the quality named or the nearest; null when the row has no such dub */
+async function streamForPick(it, pick) {
+  const d = await api(`/api/dubs?series=${it.seriesId}&episode=${it.number}&open=1`);
+  const dub = d.dubs.find(x => x.key === pick.dubKey);
+  if (!dub || !dub.qualities.length) return null;
+  const q = pick.quality ? nearestTag(dub.qualities, pick.quality) : tagByRule(it, dub.qualities);
+  return q ? { id: q.id, quality: q.quality || null, level: q.level ? qualityNum(q.quality) : null } : null;
+}
+/* the window for a part's pick: the dubs across its rows, the tags of the row playing (else the first) */
+function offerGroupPick(scope, anchor) {
+  const items = popItems();
+  const rep = items.find(it => it === cur()) || items[0];
+  if (!rep) return;
+  const ctx = { scope, items, rep };
+  saveMenuFor = ctx;
+  saveMenu.anchor = anchor.getBoundingClientRect();
+  saveMenu.hidden = false;
+  loadDubs(rep, () => { if (saveMenuFor === ctx) buildGroupMenu(ctx); });
+  buildGroupMenu(ctx);
+}
+function buildGroupMenu({ scope, items, rep }) {
+  saveMenu.replaceChildren();
+  menuTitle(saveMenu, t('queue.saveAs'));
+  const known = dubsKnown(rep);
+  const nowKey = (rep.dub && rep.dub.key) || state.dubKey;
+  const rows = dubCoverage(items).sort((a, b) => (b.key === nowKey) - (a.key === nowKey) || b.n - a.n || a.name.localeCompare(b.name));
+  const choose = (d, q) => {
+    groupPicks.set(scopeKey(scope), { dubKey: d.key, dubName: d.name, quality: q ? tagLabel(q) : null });
+    closeSaveMenu(); paintSavePop();
+  };
+  for (const d of rows) {
+    const info = known && known.find(x => x.key === d.key);
+    /* the qualities the row playing has of this dub; a dub it lacks is offered by the settings' rule alone */
+    let qs = info && info.qualities.length ? info.qualities : !known && d.key === nowKey ? tagsFromStreams(rep.streams) : [];
+    let waiting = !known || !!(info && info.unopened);
+    if (!qs.length && known && !info) { qs = [{ label: qualityWords(null), rule: true }]; waiting = false; }
+    /* how many rows have the dub, said only when some are known to lack it; rows not yet read count as possible */
+    const lacking = items.filter(it => lacksDub(it, d.key)).length;
+    const sub = lacking ? t('pop.cover', { n: items.length - lacking, total: items.length }) : '';
+    saveMenu.append(saveMenuRow(d.name, sub, qs, q => choose(d, q.rule ? null : q), { waiting }));
+  }
+  placeSaveMenu();
+}
+saveMenu.addEventListener('click', e => e.stopPropagation());
+document.addEventListener('click', e => {
+  if (saveMenu.hidden || e.target.closest('#saveMenu')) return;
+  /* the click closes the window and does nothing else; the mark it opened from toggles it itself, and the popover keeps its own clicks */
+  if (!e.target.closest('.item__save, #savePop')) { e.stopPropagation(); e.preventDefault(); }
+  closeSaveMenu();
+}, true);
 
 /* the stream of a named quality, for taking a save up again the way it was started */
 const streamOfQuality = (it, quality) => (quality && (saveQualities(it).find(o => o.label === quality) || {}).stream) || null;
+/* What is saved when nothing was picked in the save window: what is
+   watched. The quality the player has for the episode, or its wanted
+   quality before it has anything; the nearest one offered, the higher on
+   a tie, and the best there is when nothing is known. A quality of one's
+   own is picked with a tag in the save window. */
+const saveQualityWanted = () => 'played';
 const streamToSave = it => {
-  const want = state.remote.settings?.saveQuality || 'auto';
+  const want = saveQualityWanted();
   const opts = saveQualities(it);
-  const same = want !== 'auto' && opts.find(o => o.label === want);
-  return (same || opts[0] || {}).stream || it.stream;
+  if (!opts.length) return it.stream;
+  const target = want === 'max' ? 0
+               : want === 'played' ? qualityNum((it.stream && it.stream.quality) || (state.quality !== 'auto' ? state.quality : ''))
+               : qualityNum(want);
+  if (!target) return opts[0].stream;
+  const named = opts.filter(o => qualityNum(o.label));
+  if (!named.length) return opts[0].stream;
+  return named.sort((a, b) => Math.abs(qualityNum(a.label) - target) - Math.abs(qualityNum(b.label) - target) || qualityNum(b.label) - qualityNum(a.label))[0].stream;
 };
 const escapeHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -2580,7 +3900,7 @@ async function loadLibrary() {
     for (const s of lib.series) for (const e of s.episodes) {
       const k = `${e.seriesId}/${e.episode}`;
       if (!state.saved.has(k)) state.saved.set(k, []);
-      state.saved.get(k).push({ dub: e.dub, size: e.size, path: e.path });
+      state.saved.get(k).push({ dub: e.dub, dubKey: e.dubKey || null, quality: e.quality || null, size: e.size, path: e.path });
     }
   } catch (_) { /* the server may be starting */ }
   paintSaved();
@@ -2600,6 +3920,11 @@ const isSaving = it => !!(it.save && (it.save.st === 'saving' || it.save.st === 
 const isQueued = it => !!(it.save && it.save.st === 'queued');
 const isPaused = it => !!(it.save && it.save.st === 'paused');
 /* how far a save got, in its own units: sizes for a file fetched whole, a count for pieces */
+/* why a save broke off, in words: the server names it by a code; a
+   sentence kept from before 1.2.0, or made by this page, stays as it is */
+const SAVE_WHY = { gone: 'save.err.gone', denied: 'save.err.denied', origin: 'save.err.origin', network: 'save.err.network', playlist: 'save.err.playlist', noStream: 'save.err.noStream', noFfmpeg: 'save.err.noFfmpeg', ffmpeg: 'save.err.ffmpeg', disk: 'save.err.disk', access: 'save.err.access', other: 'save.err.other' };
+/* a save that broke off is worded by its own reasons; one that never opened carries the look's reason, worded as the look words it */
+const saveWhy = why => !why ? '' : typeof why === 'string' ? why : SAVE_WHY[why.key] ? t(SAVE_WHY[why.key], { status: why.status || '', detail: why.detail || '' }) : WHY[why.key] ? whyText(why) : t('save.err.other', { detail: why.detail || why.key || '' });
 const progressWords = sv => sv.unit === 'bytes' ? `${fmtSize(sv.done || 0)} / ${fmtSize(sv.total || 0)}` : `${sv.done || 0} / ${sv.total || 0}`;
 const progressPct = sv => sv.phase === 'assemble' ? 100 : sv.total ? Math.round(sv.done / sv.total * 100) : 0;
 const isFailed = it => !!(it.save && it.save.st === 'failed');
@@ -2617,9 +3942,9 @@ async function watchSaves() {
     const key = `${it.seriesId}/${it.number}/${it.dub ? it.dub.key : state.dubKey}`;
     const job = d.active.find(j => j.seriesId === it.seriesId && j.episode === it.number);
     const rec = d.pending[key] || Object.entries(d.pending).find(([k]) => k.startsWith(`${it.seriesId}/${it.number}/`))?.[1];
-    if (job) { it.save = { st: job.state === 'queued' ? 'queued' : 'saving', phase: job.phase, done: job.done, total: job.total, unit: job.unit, jobId: job.id, quality: jobQuality(job) }; active = true; }
-    else if (rec && rec.error) it.save = { st: 'failed', error: rec.error, done: rec.done || 0, total: rec.total || 0, unit: rec.unit, phase: rec.phase, quality: rec.quality || null };
-    else if (rec && rec.paused) it.save = { st: 'paused', done: rec.done || 0, total: rec.total || 0, unit: rec.unit, phase: rec.phase, quality: rec.quality || null };
+    if (job) { it.save = { st: job.state === 'queued' ? 'queued' : 'saving', phase: job.phase, done: job.done, total: job.total, unit: job.unit, jobId: job.id, quality: jobQuality(job), dubName: job.dubName || null, pick: job.streamId ? { id: job.streamId, level: job.level || null } : null }; active = true; }
+    else if (rec && rec.error) it.save = { st: 'failed', error: rec.error, done: rec.done || 0, total: rec.total || 0, unit: rec.unit, phase: rec.phase, quality: rec.quality || null, dubName: rec.dubName || null };
+    else if (rec && rec.paused) it.save = { st: 'paused', done: rec.done || 0, total: rec.total || 0, unit: rec.unit, phase: rec.phase, quality: rec.quality || null, dubName: rec.dubName || null };
     else if (it.save) { if (it.save.jobId) finished = true; it.save = null; }   // its job is gone without a record: the file is in the library
   }
   if (finished) await loadLibrary(); else paintSaved();
@@ -2653,16 +3978,15 @@ function paintSaveButton(btn, it) {
   const saved = isSaved(it);
   if (saved && it.save && it.save.st !== 'queued') it.save = null;   // the file is in the library: the job's last word does not matter
   const sv = it.save;
-  const li = btn.closest('.item'); if (li) li.classList.toggle('has-save', !!sv);
   const saving = isSaving(it), paused = isPaused(it), failed = isFailed(it), queued = isQueued(it);
   btn.classList.toggle('is-saved', saved && !saving && !paused && !failed && !queued);
   btn.classList.toggle('is-saving', saving);
   btn.classList.toggle('is-paused', paused);
   btn.classList.toggle('is-failed', failed);
   btn.classList.toggle('is-queued', queued);
-  let tip, sub = '';
+  btn._it = it;
   if (saving || paused || failed || queued) {
-    const pct = progressPct(sv), p = pct / 100;
+    const p = progressPct(sv) / 100;
     let ring = btn.querySelector('.ring');
     if (!ring) {
       btn.innerHTML = `<svg class="ring" viewBox="0 0 24 24"><circle class="ring__track" cx="12" cy="12" r="9"/><circle class="ring__fill" cx="12" cy="12" r="9" style="stroke-dasharray:${RING.toFixed(2)}"/></svg><i class="ring__pause"></i>`;
@@ -2670,21 +3994,62 @@ function paintSaveButton(btn, it) {
     }
     ring.classList.toggle('is-assembling', saving && sv.phase === 'assemble');
     ring.querySelector('.ring__fill').style.strokeDashoffset = (RING * (1 - p)).toFixed(2);
-    const got = t('queue.got', { got: progressWords(sv), pct });
-    if (failed) { tip = t('queue.saveFailed', { why: sv.error }); sub = (sv.total ? got + ' · ' : '') + t('queue.retryHint'); }
-    else if (paused) { tip = t('queue.savePaused', { got }); sub = t('queue.resumeHint'); }
-    else if (queued) { tip = t('queue.queued'); sub = t('queue.promoteHint'); }
-    else if (sv.st === 'opening') { tip = t('queue.opening'); sub = t('queue.pauseHint'); }
-    else if (sv.phase === 'assemble') { tip = t('queue.assembling'); sub = t('queue.pauseHint'); }
-    else { tip = t('queue.saving', { got }); sub = t('queue.pauseHint'); }
-    delete btn.dataset.icon;
+    /* a save under way is told by the card, not by the tooltip */
+    delete btn.dataset.icon; delete btn.dataset.tip; delete btn.dataset.tipSub;
+    btn.dataset.card = '';
   } else {
     const want = saved ? PH.check : PH.download;
     if (btn.dataset.icon !== (saved ? 'check' : 'download')) { btn.innerHTML = phSvg(want); btn.dataset.icon = saved ? 'check' : 'download'; }
-    tip = saved ? t('queue.savedAs', { size: fmtSize(sizeOf(it)), dubs: (state.saved.get(savedKey(it)) || []).map(x => x.dub).join(', ') }) : t('queue.save');
+    delete btn.dataset.card;
+    btn.dataset.tip = saved ? t('queue.savedAs', { size: fmtSize(sizeOf(it)), dubs: (state.saved.get(savedKey(it)) || []).map(x => x.dub).join(', ') }) : t('queue.save');
+    btn.dataset.tipSub = '';
   }
-  btn.dataset.tip = tip; btn.dataset.tipSub = sub;
   if (tipFor === btn) paintTip(btn);
+}
+
+/* ── the card of a row's save ──────────────────────────────────
+   While a row waits, loads, stands paused or has broken off, its ring
+   says only how far; the card beside it, to the right so the rows stay
+   in sight, says the rest: the state as its heading, the bar, how much
+   of how much, the dub and the quality, what a click does. Built once,
+   filled in place as the save moves. */
+const saveCard = $('#saveCard');
+let card = null;
+const cardParts = () => card || (card = (() => {
+  const head = el('div', 'savepop__head');
+  const bar = el('div', 'savepop__bar'), fill = el('i'); bar.append(fill);
+  const grid = el('div', 'savepop__grid');
+  const row = key => { const k = el('span', 'savepop__k', t(key)), v = el('span', 'savepop__v'); grid.append(k, v); return { k, v, key }; };
+  const got = row('card.got'), why = row('card.why'), dub = row('card.dub'), quality = row('card.quality');
+  const hint = el('div', 'savecard__hint');
+  saveCard.append(head, bar, grid, hint);
+  return { head, fill, rows: [got, why, dub, quality], got, why, dub, quality, hint };
+})());
+function paintSaveCard(btn) {
+  const it = btn._it, sv = it && it.save;
+  if (!sv || !('card' in btn.dataset)) { saveCard.hidden = true; return; }
+  const card = cardParts();
+  const failed = sv.st === 'failed', paused = sv.st === 'paused', queued = sv.st === 'queued', opening = sv.st === 'opening';
+  const assembling = !failed && !paused && !queued && sv.phase === 'assemble';
+  card.head.textContent = t(failed ? 'card.failed' : paused ? 'card.paused' : queued ? 'card.queued' : opening ? 'queue.opening' : assembling ? 'card.assembling' : 'card.saving');
+  saveCard.classList.toggle('is-failed', failed);
+  saveCard.classList.toggle('is-paused', paused);
+  card.fill.style.width = progressPct(sv) + '%';
+  const put = (r, text) => { r.k.hidden = r.v.hidden = !text; r.v.textContent = text || ''; };
+  for (const r of card.rows) r.k.textContent = t(r.key);
+  put(card.got, sv.total ? `${progressWords(sv)} · ${progressPct(sv)}%` : '');
+  put(card.why, failed ? saveWhy(sv.error) : '');
+  put(card.dub, sv.dubName || '');
+  put(card.quality, sv.quality === 'auto' ? t('pop.qBest') : sv.quality || '');
+  card.hint.textContent = t(failed ? 'queue.retryHint' : paused ? 'queue.resumeHint' : queued ? 'queue.promoteHint' : 'queue.pauseHint');
+  /* past the queue's right edge, level with the ring, so no row or group is covered; on the left only when the window ends first */
+  const r = btn.getBoundingClientRect(), panel = btn.closest('.queue');
+  saveCard.hidden = false;
+  const w = saveCard.offsetWidth, h = saveCard.offsetHeight;
+  let left = (panel ? panel.getBoundingClientRect().right : r.right) + 12;
+  if (left + w > window.innerWidth - 8) left = Math.max(8, r.left - w - 12);
+  const top = Math.max(8, Math.min(r.top + r.height / 2 - h / 2, window.innerHeight - h - 8));
+  saveCard.style.left = left + 'px'; saveCard.style.top = top + 'px';
 }
 
 /* ── Lapka's own tooltip ───────────────────────────────────────
@@ -2693,6 +4058,8 @@ function paintSaveButton(btn, it) {
    repainted with its element while it is up. */
 let tipFor = null;
 function paintTip(el) {
+  if ('card' in el.dataset) { tipEl.hidden = true; return paintSaveCard(el); }
+  saveCard.hidden = true;
   tipEl.textContent = el.dataset.tip || '';
   if (el.dataset.tipSub) { const s = document.createElement('div'); s.className = 'tip__sub'; s.textContent = el.dataset.tipSub; tipEl.append(s); }
   const r = el.getBoundingClientRect();
@@ -2705,14 +4072,75 @@ function paintTip(el) {
   left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
   tipEl.style.left = left + 'px'; tipEl.style.top = top + 'px';
 }
+const hideTips = () => { tipFor = null; tipEl.hidden = true; saveCard.hidden = true; };
 document.addEventListener('pointerover', e => {
-  const el = e.target.closest('[data-tip]');
+  const el = e.target.closest('[data-tip], [data-card]');
   if (el === tipFor) return;
-  tipFor = el;
-  if (el) paintTip(el); else tipEl.hidden = true;
+  if (!el) return hideTips();
+  tipFor = el; paintTip(el);
 });
-document.addEventListener('pointerdown', () => { tipFor = null; tipEl.hidden = true; });
-queueList.addEventListener('scroll', () => { tipFor = null; tipEl.hidden = true; }, { passive: true });
+document.addEventListener('pointerdown', hideTips);
+queueList.addEventListener('scroll', hideTips, { passive: true });
+
+/* ── Lapka's own scrollbar ─────────────────────────────────────
+   The system's bar depends on a setting of the system: as an overlay
+   it is fine, shown always it is a wide grey strip that takes room.
+   Every place that scrolls hides it and gets this one instead: a thin
+   thumb over the content, seen while the content moves or the pointer
+   comes to the edge, gone a moment later; under the pointer it grows
+   and brightens, and it can be dragged. One look everywhere. */
+const SCROLLERS = '.menu, .queue__list, .histpop__list, .savepop, .menu__col';
+const OWN_BAR = { min: 28, edge: 28, linger: 900 };
+function ownScroll(el) {
+  if (el.__bar) return;
+  el.classList.add('scroll-own');
+  const bar = document.createElement('i'); bar.className = 'bar'; bar.setAttribute('aria-hidden', 'true');
+  el.append(bar); el.__bar = bar;
+  let hideT = 0, near = false, drag = null;
+  const place = () => {
+    if (!bar.isConnected) el.append(bar);            // a menu redrawn whole took the bar with it
+    /* the thumb is measured out of the way: standing where it stood for the
+       old content, it would stretch the scrollable area past the new one */
+    bar.style.transform = '';
+    const sh = el.scrollHeight, ch = el.clientHeight;
+    if (sh <= ch + 1) { bar.hidden = true; return false; }
+    bar.hidden = false;
+    const len = Math.max(OWN_BAR.min, Math.round(ch * ch / sh));
+    const top = el.scrollTop + (el.scrollTop / (sh - ch)) * (ch - len);
+    bar.style.height = len + 'px'; bar.style.transform = `translateY(${top}px)`;
+    return true;
+  };
+  const show = () => { if (!place()) return; bar.classList.add('is-on'); clearTimeout(hideT); if (!near && !drag) hideT = setTimeout(() => bar.classList.remove('is-on'), OWN_BAR.linger); };
+  el.addEventListener('scroll', show, { passive: true });
+  el.addEventListener('pointermove', e => {
+    const r = el.getBoundingClientRect();
+    const was = near; near = r.right - e.clientX <= OWN_BAR.edge;
+    if (near) show(); else if (was) { clearTimeout(hideT); hideT = setTimeout(() => bar.classList.remove('is-on'), OWN_BAR.linger); }
+  });
+  el.addEventListener('pointerleave', () => { near = false; if (!drag) { clearTimeout(hideT); hideT = setTimeout(() => bar.classList.remove('is-on'), 300); } });
+  /* the thumb dragged moves the content by the same share */
+  bar.addEventListener('pointerdown', e => {
+    e.preventDefault(); e.stopPropagation();
+    const sh = el.scrollHeight, ch = el.clientHeight, len = bar.offsetHeight;
+    drag = { y: e.clientY, top: el.scrollTop, k: (sh - ch) / Math.max(1, ch - len) };
+    bar.classList.add('is-drag'); bar.setPointerCapture(e.pointerId);
+  });
+  bar.addEventListener('pointermove', e => { if (drag) el.scrollTop = drag.top + (e.clientY - drag.y) * drag.k; });
+  const drop = () => { if (!drag) return; drag = null; bar.classList.remove('is-drag'); show(); };
+  bar.addEventListener('pointerup', drop); bar.addEventListener('pointercancel', drop);
+  bar.addEventListener('click', e => e.stopPropagation());
+  /* the content changes its height: the thumb follows, seen or not */
+  if (typeof ResizeObserver === 'function') new ResizeObserver(place).observe(el);
+  new MutationObserver(() => requestAnimationFrame(place)).observe(el, { childList: true, subtree: true });
+  place();
+}
+for (const el of document.querySelectorAll(SCROLLERS)) ownScroll(el);
+new MutationObserver(muts => {
+  for (const m of muts) for (const n of m.addedNodes) if (n.nodeType === 1) {
+    if (n.matches(SCROLLERS)) ownScroll(n);
+    for (const el of n.querySelectorAll(SCROLLERS)) ownScroll(el);
+  }
+}).observe(document.body, { childList: true, subtree: true });
 
 function paintGroupSave(li) {
   const items = state.list.filter(it => it.group === li.dataset.group);
@@ -2745,12 +4173,15 @@ function popRow(grid, k, v, small) {
   grid.append(val);
 }
 let popScope = null, popAnchor = null, popPinned = false, pop = null;
+/* under its button: a part's popover centred on the part's button, the
+   queue's flush with the left of its own; both kept inside the window */
 function placeSavePop() {
   if (savePop.parentNode !== document.body) document.body.append(savePop);
   const anchor = popAnchor || btnSaveAll;
-  const r = anchor.getBoundingClientRect();
-  savePop.style.top = Math.min(r.bottom + 8, window.innerHeight - savePop.offsetHeight - 12) + 'px';
-  savePop.style.left = Math.max(12, Math.min(r.left, window.innerWidth - savePop.offsetWidth - 12)) + 'px';
+  const r = anchor.getBoundingClientRect(), w = savePop.offsetWidth, h = savePop.offsetHeight;
+  const left = popAnchor ? r.left + r.width / 2 - w / 2 : r.left;
+  savePop.style.top = Math.min(r.bottom + 8, window.innerHeight - h - 12) + 'px';
+  savePop.style.left = Math.max(12, Math.min(left, window.innerWidth - w - 12)) + 'px';
 }
 const popItems = () => popScope === null ? state.list : state.list.filter(it => it.group === popScope);
 
@@ -2761,10 +4192,14 @@ function buildSavePop() {
   const g = el('div', 'savepop__grid');
   const row = key => { const k = el('span', 'savepop__k', t(key)), v = el('span', 'savepop__v'); g.append(k, v); return { k, v }; };
   const saved = row('pop.saved'), now = row('pop.now'), queued = row('pop.queued'), paused = row('pop.paused'), failed = row('pop.failed'), rest = row('pop.rest'), dur = row('pop.duration');
+  /* what the Download button saves in: the line opens the window that chooses it */
+  const pickRow = row('pop.pick'); pickRow.v.className = 'savepop__v savepop__pick';
+  pickRow.v.onclick = ev => { ev.stopPropagation(); if (!popPinned) pinSavePop(popScope, popAnchor); offerGroupPick(popScope, pickRow.v); };
+  const without = row('pop.without');
   q.append(g);
   const acts = el('div', 'savepop__acts');
   const go = el('button', 'btn btn--solid'), pause = el('button', 'btn');
-  go.onclick = ev => { ev.stopPropagation(); enqueueSaves(popItems()); };
+  go.onclick = ev => { ev.stopPropagation(); const items = popItems(), pick = groupPickOf(popScope, items); enqueueSaves(pick ? items.filter(it => !lacksDub(it, pick.dubKey)) : items, null, { pick }); };
   pause.onclick = ev => { ev.stopPropagation(); pauseItems(popItems(), popScope === null); };
   acts.append(go, pause); q.append(acts);
   /* the destructive pair asks twice: the first click arms the button, the second within a few seconds acts */
@@ -2794,7 +4229,7 @@ function buildSavePop() {
   const lib = popScope === null ? popSection(t('pop.library')) : null;
   if (lib) { lib.hidden = true; frag.append(lib); }
   savePop.replaceChildren(frag);
-  pop = { refs: { fill, saved, now, queued, paused, failed, rest, dur, go, pause, cancel, del, parts, lib } };
+  pop = { refs: { fill, saved, now, queued, paused, failed, rest, dur, pickRow, without, go, pause, cancel, del, parts, lib } };
 }
 
 /* the words and the buttons, from the queue as it is now */
@@ -2823,11 +4258,18 @@ function paintSavePop() {
   put(r.now, cur1 ? cur1.name : '', cur1 && cur1.save.st === 'saving' ? (cur1.save.total ? `${progressWords(cur1.save)} · ${progressPct(cur1.save)}%` : t('queue.assembling')) : (cur1 ? t('queue.opening') : ''), loading.length > 0);
   put(r.queued, String(queued.length), '', queued.length > 0);
   put(r.paused, String(paused.length), '', paused.length > 0);
-  put(r.failed, String(failed.length), failed[0] ? failed[0].save.error : '', failed.length > 0);
+  put(r.failed, String(failed.length), failed[0] ? saveWhy(failed[0].save.error) : '', failed.length > 0);
   put(r.rest, String(left.length), t('pop.about', { size: fmtSize(estimate) }), estimate > 0 && left.length > 0);
   put(r.dur, fmtLong(dur), known.length < items.length ? t('pop.ofKnown', { n: known.length }) : '', dur > 0);
-  /* the buttons: start or take up what is not saved here; pause what loads here */
-  const toGo = left.filter(it => !isSaving(it));
+  /* the pick, and the rows it leaves out for want of the dub */
+  const pick = groupPickOf(popScope, items);
+  /* nothing chosen yet: one phrase, "as played", for the dub and the quality both; a dub the
+     player's is not in this part is named, since it is Lapka's pick, not the player's */
+  put(r.pickRow, !pick ? '' : pick.implied && pick.played ? t('pop.qPlayed') : `${pick.dubName} · ${qualityWords(pick.quality)}`, '', !!pick);
+  const lacking = pick ? left.filter(it => lacksDub(it, pick.dubKey)) : [];
+  put(r.without, lacking.length ? `${pick.dubName} · ${t('pop.episodes', { n: lacking.length })}` : '', '', lacking.length > 0);
+  /* the buttons: start or take up what is not saved here and has the dub; pause what loads here */
+  const toGo = left.filter(it => !isSaving(it) && !(pick && lacksDub(it, pick.dubKey)));
   r.go.hidden = !toGo.length;
   r.go.textContent = (paused.length || failed.length ? t(popScope === null ? 'pop.resumeAll' : 'pop.resumePart') : t(popScope === null ? 'pop.download' : 'pop.downloadPart')) + ` · ${toGo.length}`;
   r.pause.hidden = !loading.length;
@@ -2899,13 +4341,12 @@ savePop.addEventListener('pointerenter', () => clearTimeout(popT));
 savePop.addEventListener('pointerleave', hideSavePop);
 savePop.addEventListener('click', e => e.stopPropagation());
 document.addEventListener('click', e => {
-  if (!popPinned || e.target.closest('#savePop')) return;
+  if (!popPinned || e.target.closest('#savePop, #saveMenu')) return;
   /* the click closes the popover and does nothing else: the anchors toggle it themselves */
   const anchor = e.target.closest('#btnSaveAll, .queue__group-save');
   if (!anchor) { e.stopPropagation(); e.preventDefault(); }
   unpinSavePop();
 }, true);
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && popPinned) unpinSavePop(); });
 /* the header's button and a group's mark open their popovers; nothing starts from the click itself */
 let popClosedAt = 0;
 btnSaveAll.onclick = () => { if (Date.now() - popClosedAt < 50 && popClosedScope === null) return; pinSavePop(null); };
@@ -2927,12 +4368,14 @@ queueList.addEventListener('click', e => {
    of its own keeps that stream for its turn. */
 const saveQueue = [];
 let opener = null;
-function enqueueSaves(items, stream = null, { first = false } = {}) {
+function enqueueSaves(items, stream = null, { first = false, pick: groupPick = null } = {}) {
   for (const it of items) {
     if (isSaved(it) || isSaving(it) || isQueued(it)) continue;
     const before = it.save || {};
     it.saveStream = stream || null;
-    it.save = { st: 'queued', quality: (stream && stream.quality) || before.quality || null, done: before.done || 0, total: before.total || 0, unit: before.unit, phase: before.phase };
+    /* what was picked stays with the row: a pause and a resume keep the dub and the quality */
+    const pick = stream ? { id: stream.id, level: stream.level || null } : before.pick || null;
+    it.save = { st: 'queued', quality: (stream && stream.quality) || before.quality || null, dubName: (stream && stream.dubName) || (groupPick && groupPick.dubName) || before.dubName || null, pick, groupPick: groupPick || before.groupPick || null, done: before.done || 0, total: before.total || 0, unit: before.unit, phase: before.phase };
     if (first) saveQueue.unshift(it); else saveQueue.push(it);
   }
   paintSaved();
@@ -2952,29 +4395,39 @@ async function openSaves() {
 async function submitSave(it, stream = null) {
   const before = it.save || {};
   const quality = stream ? (stream.quality || null) : before.quality || null;
+  const pick = stream ? { id: stream.id, level: stream.level || null } : before.pick || null;
   const first = !!before.first;
   it.pauseWanted = false;
-  it.save = { st: 'opening', phase: 'fetch', done: before.done || 0, total: before.total || 0, unit: before.unit, quality }; paintSaved();
+  it.save = { st: 'opening', phase: 'fetch', done: before.done || 0, total: before.total || 0, unit: before.unit, quality, dubName: before.dubName || null, pick }; paintSaved();
   try {
     if (!it.stream) await resolveItem(it);
-    if (it.pauseWanted) { it.save = { st: 'paused', phase: before.phase || 'fetch', done: before.done || 0, total: before.total || 0, unit: before.unit, quality }; paintSaved(); return; }
-    const st = stream || streamOfQuality(it, quality) || streamToSave(it);
+    if (it.pauseWanted) { it.save = { st: 'paused', phase: before.phase || 'fetch', done: before.done || 0, total: before.total || 0, unit: before.unit, quality, dubName: before.dubName || null, pick }; paintSaved(); return; }
+    /* a part's pick names the dub and the quality for every row of it */
+    let st = stream || pick || null;
+    if (!st && before.groupPick) { st = await streamForPick(it, before.groupPick); if (!st) throw new Error(t('pop.noDub', { dub: before.groupPick.dubName })); }
+    st = st || streamOfQuality(it, quality) || streamToSave(it);
     if (!st) throw new Error(t('toast.noStream', { name: it.name }));
-    let job = await post('/api/save?stream=' + st.id + (first ? '&first=1' : ''));
+    let job = await post('/api/save?stream=' + st.id + (st.level ? '&level=' + st.level : '') + (first ? '&first=1' : ''));
     if (it.pauseWanted) job = await post('/api/save/pause?id=' + encodeURIComponent(job.id));
     it.save = jobState(job, quality); paintSaved();
   } catch (e) {
-    it.save = { st: 'failed', error: e.message, phase: before.phase, done: before.done || 0, total: before.total || 0, unit: before.unit, quality }; paintSaved();
-    toast(t('toast.saveFail', { why: e.message }));
+    it.save = { st: 'failed', error: e.reason || e.message, phase: before.phase, done: before.done || 0, total: before.total || 0, unit: before.unit, quality, dubName: before.dubName || null, pick }; paintSaved();
+    toast(t('toast.saveFail', { why: saveWhy(e.reason || e.message) }));
+    /* the server is told of the save that did not open, so it is taken up again like one that broke off */
+    const note = new URLSearchParams({ series: it.seriesId, episode: String(it.number), dub: (it.dub && it.dub.key) || state.dubKey || '', quality: quality || '', dubName: before.dubName || '', why: (e.reason && e.reason.key) || 'other' });
+    if (e.reason && e.reason.detail) note.set('detail', e.reason.detail); else if (!e.reason) note.set('detail', String(e.message || '').slice(0, 200));
+    await post('/api/save/note?' + note).catch(() => {});
   }
 }
 /* a server job as the row's state */
 function jobState(job, quality = null) {
   const q = jobQuality(job) || quality;
-  if (job.state === 'paused') return { st: 'paused', phase: job.phase, done: job.done || 0, total: job.total || 0, unit: job.unit, quality: q };
-  if (job.state === 'error') return { st: 'failed', error: job.error, phase: job.phase, done: job.done || 0, total: job.total || 0, unit: job.unit, quality: q };
+  const pick = job.streamId ? { id: job.streamId, level: job.level || null } : null;
+  const dubName = job.dubName || null;
+  if (job.state === 'paused') return { st: 'paused', phase: job.phase, done: job.done || 0, total: job.total || 0, unit: job.unit, quality: q, dubName, pick };
+  if (job.state === 'error') return { st: 'failed', error: job.error, phase: job.phase, done: job.done || 0, total: job.total || 0, unit: job.unit, quality: q, dubName, pick };
   if (job.state === 'done') return null;
-  return { st: job.state === 'queued' ? 'queued' : 'saving', phase: job.phase, done: job.done || 0, total: job.total || 0, unit: job.unit, jobId: job.id, quality: q };
+  return { st: job.state === 'queued' ? 'queued' : 'saving', phase: job.phase, done: job.done || 0, total: job.total || 0, unit: job.unit, jobId: job.id, quality: q, dubName, pick };
 }
 
 /* rows taken out of this page's line go back to what they were before they were asked */
@@ -2995,7 +4448,7 @@ async function promoteSave(it) {
   if (!sv || sv.st !== 'queued') return;
   if (sv.jobId) {
     try { const job = await post('/api/save/promote?id=' + encodeURIComponent(sv.jobId)); it.save = jobState(job, sv.quality); }
-    catch (e) { toast(t('toast.saveFail', { why: e.message })); }
+    catch (e) { toast(t('toast.saveFail', { why: saveWhy(e.reason || e.message) })); }
   } else {
     const i = saveQueue.indexOf(it); if (i >= 0) saveQueue.splice(i, 1);
     sv.first = true;
@@ -3019,7 +4472,7 @@ async function cancelSaves(items) {
   for (const it of mine) { if (!bySeries.has(it.seriesId)) bySeries.set(it.seriesId, []); bySeries.get(it.seriesId).push(it.number); }
   try {
     for (const [seriesId, eps] of bySeries) await post(`/api/saves/cancel?series=${encodeURIComponent(seriesId)}&episodes=${eps.join(',')}`);
-  } catch (e) { toast(t('toast.saveFail', { why: e.message })); }
+  } catch (e) { toast(t('toast.saveFail', { why: saveWhy(e.reason || e.message) })); }
   if (mine.length) toast(t('toast.cancelled', { n: mine.length }));
   clearTimeout(savesT); watchSaves();
 }
@@ -3030,7 +4483,7 @@ async function deleteSaved(items) {
   let n = 0;
   try {
     for (const [seriesId, eps] of bySeries) n += (await post(`/api/library/delete?series=${encodeURIComponent(seriesId)}&episodes=${eps.join(',')}`)).removed || 0;
-  } catch (e) { toast(t('toast.saveFail', { why: e.message })); }
+  } catch (e) { toast(t('toast.saveFail', { why: saveWhy(e.reason || e.message) })); }
   await loadLibrary();
   toast(t('toast.deleted', { n }));
 }
@@ -3050,7 +4503,7 @@ async function pauseItems(items, whole = false) {
     if (whole) await post('/api/saves/pause');
     else await Promise.all(jobs.map(it => post('/api/save/pause?id=' + encodeURIComponent(it.save.jobId))));
   } catch (e) { toast(t('toast.pauseFail', { why: e.message })); return; }
-  for (const it of jobs) it.save = { st: 'paused', phase: it.save.phase, done: it.save.done || 0, total: it.save.total || 0, unit: it.save.unit, quality: it.save.quality || null };
+  for (const it of jobs) it.save = { st: 'paused', phase: it.save.phase, done: it.save.done || 0, total: it.save.total || 0, unit: it.save.unit, quality: it.save.quality || null, dubName: it.save.dubName || null };
   paintSaved();
   clearTimeout(savesT); watchSaves();       // the rows follow the server's records
 }
@@ -3555,6 +5008,7 @@ function paintPlay() {
 }
 
 video.addEventListener('play', () => {
+  hidePauseInfo();
   paintPlay(); pipPoke(); pipGhost.classList.add('playing');
   pulse(true); syncStatus(); markPlaying(true);
   deckShow(false);
@@ -3565,16 +5019,97 @@ video.addEventListener('pause', () => {
   /* At the end of a file the browser sends pause BEFORE ended, and that
      is not a stop the user asked for. The ended handler decides. */
   if (video.ended) return;
-  const it = cur();
-  if (it) markPos(it, video.currentTime);
+  if (loaded) markPos(loaded, video.currentTime);
   deckShow(true);
+  setTimeout(paintPauseInfo, 400);   // a moment after: a pause that turns into a seek or a switch shows nothing
 });
+
+/* ── what the page said of the series, while paused ──────────
+   The facts of the part the paused episode belongs to, over the whole
+   frame: the name and one other name of the same part, then two
+   columns, the facts in a meaningful order on the left (what it is,
+   what it is about, who made it, for whom), the dubs by name on the
+   right. A row without a value is not drawn; a label stands as wide as
+   the widest. Shown for as long as the pause lasts, when the setting is
+   on; a play, a switch, the end card take it away. */
+const pauseInfo = $('#pauseInfo'), pauseCover = $('#pauseCover'), pauseTitle = $('#pauseTitle'), pauseAlt = $('#pauseAlt'), pauseFacts = $('#pauseFacts'), pauseDubs = $('#pauseDubs');
+/* One other name of this very part, not the franchise's roll of names:
+   the one that carries the same number as the title does (the second
+   season's own), in another script by preference, else the first that
+   is not the title itself. */
+/* the same name written another way is no other name: case, marks and
+   spaces aside, and the letters that differ between the Cyrillic alphabets
+   (і, ї, є, ґ, ё, the signs) brought to one */
+const nameKey = s => String(s || '').toLowerCase().replace(/[іїй]/g, 'и').replace(/[єё]/g, 'е').replace(/ґ/g, 'г').replace(/[ъьʼ'’]/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
+const sameName = (a, b) => nameKey(a) === nameKey(b);
+/* The other name of a series is its international one (in Latin letters)
+   or its original one (in its own script); a title already in either needs
+   none, and a name in Cyrillic is a translation, never the other name. Of
+   the names the page gave, the one of the same part (the same trailing
+   number) in Latin letters comes first, then the original. */
+function otherName(series) {
+  const title = String(series.title || '').trim();
+  const cyr = /[\u0400-\u04ff]/;
+  if (!cyr.test(title)) return '';
+  const all = (series.altTitles || []).map(a => String(a).trim()).filter(a => a && !cyr.test(a) && !sameName(a, title));
+  if (!all.length) return '';
+  const n = /(\d{1,2})\s*$/.exec(title)?.[1] || (series.season && series.season > 1 ? String(series.season) : null);
+  const same = n ? all.filter(a => new RegExp(`(?:^|[^\\d])${n}(?:[^\\d]|$)`).test(a)) : all;
+  const pool = same.length ? same : n ? [] : all;
+  if (!pool.length) return '';
+  return pool.find(a => /[A-Za-z]/.test(a)) || pool[0];
+}
+let restoredIdle = false;   // a session brought back and not started: the stage shows the episode, paused in effect
+function paintPauseInfo() {
+  const it = cur();
+  const due = state.set.pauseInfo !== 'off' && it && (it.loadedSrc || restoredIdle) && video.paused && !video.ended && !endCard.classList.contains('show') && !stage.classList.contains('is-empty');
+  if (!due) { pauseInfo.classList.remove('show'); pauseInfo.setAttribute('aria-hidden', 'true'); return; }
+  const season = seasonOf(it);
+  const s = season ? season.series : state.series;
+  if (!s) { pauseInfo.classList.remove('show'); return; }
+  const f = s.facts || {};
+  if (s.cover) pauseCover.src = s.cover; else pauseCover.removeAttribute('src');
+  pauseTitle.textContent = s.title || '';
+  pauseAlt.textContent = otherName(s);
+  const episodes = f.episodesTotal ? (f.episodes && f.episodes < f.episodesTotal ? `${f.episodes} / ${f.episodesTotal}` : String(f.episodesTotal)) : s.episodes && s.episodes.length ? String(s.episodes.length) : null;
+  const rows = [
+    ['kind', kindLabel(s) || (s.kind === 'tv' ? t('info.tv') : null)], ['year', s.year], ['episodes', episodes],
+    ['genres', (f.genres || []).map(g => g.replace(/ /g, '\u00a0')).join(', ')], ['origin', f.origin], ['studio', f.studio],   // a genre's name stays on one line, the list breaks after a comma
+    ['age', [f.age, f.mpaa].filter(Boolean).join(' · ').replace(/-/g, '\u2011')],   // PG‑13 stays on one line
+  ].filter(([, v]) => v);
+  pauseFacts.replaceChildren(...rows.flatMap(([k, v]) => { const a = document.createElement('span'); a.className = 'pauseinfo__k'; a.textContent = t('info.' + k); const b = document.createElement('span'); b.className = 'pauseinfo__v'; b.textContent = String(v); return [a, b]; }));
+  const dubs = it.dubs || [];
+  if (dubs.length) {
+    const k = document.createElement('span'); k.className = 'pauseinfo__k'; k.textContent = t('info.dubs');
+    const list = document.createElement('div'); list.className = 'pauseinfo__names';
+    for (const d of dubs) { const i = document.createElement('i'); i.textContent = d.name; if (it.dub && d.key === it.dub.key) i.classList.add('is-on'); if (d.sources && !d.alive) i.classList.add('is-dead'); list.append(i); }
+    pauseDubs.replaceChildren(k, list);
+  } else pauseDubs.replaceChildren();
+  pauseInfo.setAttribute('aria-hidden', 'false');
+  pauseInfo.classList.add('show');
+}
+const hidePauseInfo = () => { pauseInfo.classList.remove('show'); pauseInfo.setAttribute('aria-hidden', 'true'); };
 let posT = 0;
 /* ── skipping the opening or the ending ─────────────────────────
    While the time is inside a mark the button is there; press it and
    the mark is jumped over, dismiss it and it stays away for this
    mark of this episode, do nothing and it goes when the mark ends. */
+/* The plate over the picture while the time is inside a marked zone.
+   By hand: the button skips, the cross hides the plate for this zone.
+   By itself (the setting): the button reads Watch and fills from left
+   to right over six seconds of playing; unanswered, the zone is skipped;
+   Watch keeps this zone and this zone alone; the cross skips at once.
+   A zone answered either way is done for this episode: seeking back
+   into it shows no plate again. */
+const AUTO_SKIP_S = 6;
 let skipNow = null;
+function hideSkip() { skipNow = null; skipEl.hidden = true; }
+function doSkip(it, zone, done = false) {
+  seekTo(zone.stop);
+  flash(t('skip.' + zone.name));
+  if (done && it) it.skipHidden[zone.name] = true;
+  hideSkip();
+}
 function paintSkip() {
   const it = cur();
   const t0 = video.currentTime;
@@ -3583,31 +5118,43 @@ function paintSkip() {
     const m = it.marks[name];
     if (m && !it.skipHidden[name] && t0 >= m.start && t0 < m.stop - 1) { found = { name, ...m }; break; }
   }
-  if (!found) { if (skipNow) { skipNow = null; skipEl.hidden = true; } return; }
-  if (skipNow && skipNow.name === found.name) return;
+  if (!found) { if (skipNow) hideSkip(); return; }
+  if (skipNow && skipNow.name === found.name) {
+    if (skipNow.auto) {
+      const f = Math.min(1, Math.max(0, (t0 - skipNow.since) / skipNow.wait));
+      btnSkip.style.setProperty('--fill', f.toFixed(3));
+      if (f >= 1) doSkip(it, skipNow, true);
+    }
+    return;
+  }
   skipNow = found;
-  btnSkip.textContent = t('skip.' + found.name);
+  const auto = state.set.autoSkip === 'on';
+  if (auto) { skipNow.auto = true; skipNow.since = t0; skipNow.wait = Math.max(1, Math.min(AUTO_SKIP_S, found.stop - 1 - t0)); }
+  btnSkip.textContent = t(auto ? 'skip.watch' : 'skip.' + found.name);
+  btnSkip.classList.toggle('is-auto', auto);
+  btnSkip.style.setProperty('--fill', '0');
+  btnSkipHide.title = t(auto ? 'skip.now' : 'skip.hide');
   skipEl.hidden = false;
 }
 btnSkip.onclick = () => {
   if (!skipNow) return;
-  seekTo(skipNow.stop);
-  flash(t('skip.' + skipNow.name));
-  skipNow = null; skipEl.hidden = true;
+  const it = cur();
+  if (skipNow.auto) { if (it) it.skipHidden[skipNow.name] = true; hideSkip(); }   // watched: this zone stays
+  else doSkip(it, skipNow);
 };
 btnSkipHide.onclick = () => {
+  if (!skipNow) return;
   const it = cur();
-  if (it && skipNow) it.skipHidden[skipNow.name] = true;
-  skipNow = null; skipEl.hidden = true;
+  if (skipNow.auto) doSkip(it, skipNow, true);
+  else { if (it) it.skipHidden[skipNow.name] = true; hideSkip(); }
 };
 
 video.addEventListener('timeupdate', () => {
   paintSeek(); updatePositionState(); paintSkip();
-  const now = Date.now();
-  if (now - posT < 5000) return;
-  posT = now;
-  const it = cur();
-  if (it && !video.paused) markPos(it, video.currentTime);
+  if (!loaded || video.paused) return;
+  const now = Date.now(), send = now - posT >= 5000;
+  if (send) posT = now;
+  markPos(loaded, video.currentTime, send);
 });
 video.addEventListener('progress', paintSeek);
 video.addEventListener('seeked', () => { state.seekPreview = null; paintSeek(); });
@@ -3639,10 +5186,12 @@ video.addEventListener('playing', () => {
     it.retries = 0;                  // it plays: the count of tries starts over
   }
 });
-video.addEventListener('waiting', () => { const it = cur(); if (it && it.loadedSrc) sayStalled(it); });
+video.addEventListener('waiting', () => { diary('video', 'waiting'); const it = cur(); if (it && it.loadedSrc) sayStalled(it); });
+for (const ev of ['stalled', 'canplay', 'playing', 'ended', 'loadedmetadata', 'emptied', 'suspend']) video.addEventListener(ev, () => diary('video', ev));
 video.addEventListener('canplay', () => { clearTimeout(stallT); hideNotice('busy'); });
 video.addEventListener('timeupdate', () => { if (noticeKind === 'busy' && !video.paused && video.readyState >= 3) hideNotice('busy'); });   // the picture moves: nothing is waiting
 video.addEventListener('ended', () => {
+  markWatched(loaded);             // however short the episode was
   /* looping one file works even with autoplay off: it is a mode set
      explicitly, not an automatic decision */
   const advancing = state.loop === 'one' || state.autoplay;
@@ -3662,6 +5211,7 @@ video.addEventListener('ended', () => {
    which marks its source dead and picks again. Only when that has
    been tried does the episode count as broken and the queue moves on. */
 video.addEventListener('error', () => {
+  diary('video', `error${video.error ? ' ' + video.error.code : ''}`);
   stage.classList.remove('fading');
   const it = cur();
   if (!it || !it.loadedSrc) return;
@@ -3669,6 +5219,8 @@ video.addEventListener('error', () => {
      broken. Seen, not guessed at: the stage says the source failed and
      which one is being tried, so a pause here never reads as a dead
      player. */
+  /* the file from the library did not play: this start goes to the net, the file is left where it is */
+  if (it.stream && it.stream.local) { it.noLocal = true; busyOver(); toast(t('toast.localFailed')); playItem(it, !video.paused, false); return; }
   const failed = it.stream && it.stream.id;
   it.retries = (it.retries || 0) + 1;
   if (failed && it.retries <= 3) {
@@ -3677,7 +5229,7 @@ video.addEventListener('error', () => {
     it.switching = { from, n: it.retries };
     busyOver();
     showNotice(t('notice.switching', { from: from || '?', n: it.retries, total: 3 }), { kind: 'switching', busy: true });
-    playItem(it, true, false);
+    playItem(it, !video.paused, false);   // a pause set by hand stays a pause through the switch
     return;
   }
   it.switching = null;
@@ -3718,8 +5270,8 @@ function syncStatus() {
    the favicon shows it, the same dark coin as before with a different
    mark inside. */
 const FAV = {
-  /* the paw of the seal, the first frame, drawn as rectangles: white on the black plate */
-  idle:  '<path d="M11.84 7.68h1.39v1.39h-1.39z M13.23 7.68h1.39v1.39h-1.39z M17.39 7.68h1.39v1.39h-1.39z M18.77 7.68h1.39v1.39h-1.39z M9.07 9.07h1.39v2.77h-1.39z M10.45 9.07h1.39v2.77h-1.39z M11.84 9.07h1.39v2.77h-1.39z M13.23 9.07h1.39v2.77h-1.39z M17.39 9.07h1.39v2.77h-1.39z M18.77 9.07h1.39v2.77h-1.39z M20.16 9.07h1.39v2.77h-1.39z M21.55 9.07h1.39v2.77h-1.39z M4.91 13.23h1.39v1.39h-1.39z M6.29 13.23h1.39v1.39h-1.39z M11.84 11.84h1.39v1.39h-1.39z M13.23 11.84h1.39v1.39h-1.39z M17.39 11.84h1.39v1.39h-1.39z M18.77 11.84h1.39v1.39h-1.39z M24.32 13.23h1.39v1.39h-1.39z M25.71 13.23h1.39v1.39h-1.39z M3.52 14.61h1.39v2.77h-1.39z M4.91 14.61h1.39v2.77h-1.39z M6.29 14.61h1.39v2.77h-1.39z M7.68 14.61h1.39v2.77h-1.39z M22.93 14.61h1.39v2.77h-1.39z M24.32 14.61h1.39v2.77h-1.39z M25.71 14.61h1.39v2.77h-1.39z M27.09 14.61h1.39v2.77h-1.39z M4.91 17.39h1.39v1.39h-1.39z M6.29 17.39h1.39v1.39h-1.39z M11.84 18.77h1.39v1.39h-1.39z M13.23 17.39h1.39v2.77h-1.39z M14.61 17.39h1.39v2.77h-1.39z M16 17.39h1.39v2.77h-1.39z M17.39 17.39h1.39v2.77h-1.39z M18.77 18.77h1.39v1.39h-1.39z M24.32 17.39h1.39v1.39h-1.39z M25.71 17.39h1.39v1.39h-1.39z M10.45 20.16h1.39v2.77h-1.39z M11.84 20.16h1.39v2.77h-1.39z M13.23 20.16h1.39v2.77h-1.39z M14.61 20.16h1.39v2.77h-1.39z M16 20.16h1.39v2.77h-1.39z M17.39 20.16h1.39v2.77h-1.39z M18.77 20.16h1.39v2.77h-1.39z M20.16 20.16h1.39v2.77h-1.39z M11.84 22.93h1.39v1.39h-1.39z M13.23 22.93h1.39v2.77h-1.39z M14.61 22.93h1.39v2.77h-1.39z M16 22.93h1.39v2.77h-1.39z M17.39 22.93h1.39v2.77h-1.39z M18.77 22.93h1.39v1.39h-1.39z" fill="#fff" shape-rendering="crispEdges"/>',
+  /* the paw of the seal, the first frame, as rectangles: white on the black plate */
+  idle:  `<path d="${PAW_PATHS[0]}" fill="#fff" shape-rendering="crispEdges"/>`,
   play:  `<path d="M12.8 9.3 23 16l-10.2 6.7z" fill="#fff"/>`,
   pause: `<path d="M11.6 9.4h3.3v13.2h-3.3zM17.1 9.4h3.3v13.2h-3.3z" fill="#fff"/>`,
   busy:  `<path d="M10.3 8.8h11.4v2.3l-4.6 4.9 4.6 4.9v2.3H10.3v-2.3l4.6-4.9-4.6-4.9z" fill="#fff"/>`,
@@ -3802,10 +5354,14 @@ linkForm.addEventListener('submit', e => {
   const u = linkInput.value.trim();
   if (u) openLink(u);
 });
+/* Enter in the footer's field: a link opens; other words are a search in
+   the history, and open the row stood on */
+const looksLikeLink = u => /^(?:https?:)?\/\//i.test(u) || /^[\w.-]+\.[a-z]{2,}(?:[/?#:]|$)/i.test(u);
 queueLinkForm.addEventListener('submit', e => {
   e.preventDefault();
   const u = queueLinkInput.value.trim();
-  if (u) { queueLinkInput.value = ''; openLink(u); }
+  if (u && looksLikeLink(u)) { queueLinkInput.value = ''; closeHistory(); openLink(u); return; }
+  if (!histPop.hidden && histActive) histActive.click();   // the field empty or a search: the row stood on
 });
 
 const linkIn = dt => {
@@ -3872,14 +5428,26 @@ function onKey(e) {
     case 'KeyQ': toggleQueue(); break;
     case 'Home': e.preventDefault(); seekTo(0); break;
     case 'End':  e.preventDefault(); seekTo(duration() - 2); break;
-    case 'Escape':
-      if (anyMenuOpen()) closeMenus();
-      else if (state.pipWin) state.pipWin.close();
-      else if (state.queueOpen) toggleQueue(false);
-      break;
   }
   poke();
 }
+/* Esc closes one layer, the topmost, and stops: the save window over the
+   popover, the history list, the pinned popover, a menu of the deck, the
+   PiP window, the queue. Another Esc takes the next. It works from an
+   input too, so a search in the history can be cleared and closed. */
+function onEscape(e) {
+  if (e.key !== 'Escape' || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (!saveMenu.hidden) closeSaveMenu();
+  else if (!overview.hidden) closeOverview();
+  else if (escapeHistory()) { /* cleared or closed */ }
+  else if (popPinned) unpinSavePop();
+  else if (anyMenuOpen()) closeMenus();
+  else if (state.pipWin) state.pipWin.close();
+  else if (state.queueOpen) toggleQueue(false);
+  else return;
+  e.preventDefault(); e.stopPropagation(); poke();
+}
+document.addEventListener('keydown', onEscape);
 document.addEventListener('keydown', onKey);
 document.addEventListener('keyup', e => {
   if (e.key === ' ' && e.target && e.target.tagName === 'BUTTON') e.target.blur();
@@ -3896,11 +5464,14 @@ document.addEventListener('keyup', e => {
   btnAudio.hidden = true;
   btnSubs.hidden = true;
 
-  /* what the server remembers: positions and the dub per series */
+  /* what the server remembers: positions, watched episodes and the dub per series */
   try {
     const st = await api('/api/state');
     state.remote = st;
-    for (const [k, v] of Object.entries(st.positions || {})) state.positions[k] = v.t;
+    for (const [k, v] of Object.entries(st.positions || {})) state.positions[k] = { t: v.t, d: v.d || 0, at: v.at || 0 };   // the moment too: the place last watched is the newest
+    for (const k of Object.keys(st.watched || {})) state.watched[k] = true;
+    /* the settings sheet is drawn from these the moment it first opens */
+    askHome().catch(() => {}); askCache().catch(() => {}); checkServer();
   } catch (_) { /* the server may be starting */ }
 
   sessionReady = true;
@@ -3919,10 +5490,9 @@ function paintModeHint() {
   syncOpenButton();
 }
 
-window.addEventListener('beforeunload', () => {
-  const it = cur();
-  if (it && video.currentTime) markPos(it, video.currentTime);
-  if (state.pipWin) state.pipWin.close();
-});
+/* the page leaving: the place is sent at once, not after a timer the page would not live to see; pagehide is the event the browsers agree on, beforeunload the older one */
+const leaving = () => { if (loaded && video.currentTime) markPos(loaded, video.currentTime, 'now'); };
+window.addEventListener('pagehide', leaving);
+window.addEventListener('beforeunload', () => { leaving(); if (state.pipWin) state.pipWin.close(); });
 
 })();

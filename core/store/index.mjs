@@ -23,17 +23,25 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { installKind } from '../update.mjs';
 
 export const GB = 1024 ** 3;
 export const HOT_MS = 10 * 60 * 1000;
 const LIMIT_MIN_GB = 1;
 
-/* Where the Lapka folder is. Choosing it is the user's, at first
-   start, and that comes with the UI; until then it is inside the
-   project, under .dev/. The desktop owner sets LAPKA_DATA_DIR to
-   its durable Application Support folder. LAPKA_HOME overrides. */
-export function defaultHome() {
-  return process.env.LAPKA_HOME || path.join(process.env.LAPKA_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '.dev'), 'home');
+/* Where the Lapka folder is until the user chooses one in the settings.
+   A clone or an unpacked archive keeps it inside its own folder, under
+   .dev/, so nothing lands anywhere else on the machine. A Lapka run from
+   the npm cache (npx, a global install) has no folder of its own to keep
+   things in: the cache is replaced by the next version, so the folder is
+   Lapka in the user's home folder, named as a Lapka folder is.
+   The desktop owner uses LAPKA_DATA_DIR for its durable initial library.
+   LAPKA_HOME overrides. */
+export function defaultHome({ kind = installKind(), homeDir = os.homedir() } = {}) {
+  if (process.env.LAPKA_HOME) return process.env.LAPKA_HOME;
+  if (process.env.LAPKA_DATA_DIR) return path.join(process.env.LAPKA_DATA_DIR, 'home');
+  if (kind === 'npx') return path.join(homeDir, 'Lapka');
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '.dev', 'home');
 }
 
 export async function openStore({ home = defaultHome(), limitGb = 24 } = {}) {
@@ -129,7 +137,25 @@ export async function openStore({ home = defaultHome(), limitGb = 24 } = {}) {
     return { bytes: total, dropped };
   }
 
-  return { home, own, cache };
+  /* what the folder takes apart from the cache: the files kept and Lapka's own notes */
+  async function weigh(dir = home) {
+    let bytes = 0;
+    for (const d of await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+      const p = path.join(dir, d.name);
+      if (p === cacheDir) continue;
+      if (d.isDirectory()) bytes += await weigh(p);
+      else if (d.isFile()) { try { bytes += (await fsp.stat(p)).size; } catch { /* gone */ } }
+    }
+    return bytes;
+  }
+  /* what Lapka learned about sites, dropped; the folder stays for what comes next */
+  async function forgetKnowledge() {
+    const dir = path.join(own, 'knowledge');
+    await fsp.rm(dir, { recursive: true, force: true });
+    await fsp.mkdir(dir, { recursive: true });
+  }
+
+  return { home, own, cache, weigh, forgetKnowledge };
 }
 
 export const exists = p => { try { fs.accessSync(p); return true; } catch { return false; } };

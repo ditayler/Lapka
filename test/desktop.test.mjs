@@ -9,8 +9,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-async function launch(data, port = 0) {
-  const child = spawn(process.execPath, [path.join(root, 'core/desktop.mjs')], {
+async function launch(data, port = 0, appRoot = root) {
+  const child = spawn(process.execPath, [path.join(appRoot, 'core/desktop.mjs')], {
     cwd: os.tmpdir(), stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, LAPKA_DATA_DIR: data, LAPKA_DESKTOP_PORT: String(port), LAPKA_CONFIG: '', LAPKA_HOME: '' },
   });
@@ -32,7 +32,7 @@ async function launch(data, port = 0) {
 async function using(fn) {
   const data = await fsp.mkdtemp(path.join(os.tmpdir(), 'lapka-desktop space-'));
   const children = [];
-  try { await fn(data, async port => { const app = await launch(data, port); children.push(app); return app; }); }
+  try { await fn(data, async (port, appRoot) => { const app = await launch(data, port, appRoot); children.push(app); return app; }); }
   finally {
     for (const app of children) { app.child.kill('SIGKILL'); app.child.stdin.destroy(); }
     await fsp.rm(data, { force: true, recursive: true });
@@ -54,12 +54,12 @@ test('desktop uses durable data outside the app, preserves chosen library and cl
   assert.equal((await app.exited)[0], 0);
   await assert.rejects(fetch(ready.url + '/api/ping'));
   const config = JSON.parse(await fsp.readFile(path.join(data, 'config.json'), 'utf8'));
-  assert.equal(config.home, folder);
+  assert.equal(config.home, path.join(folder, 'Lapka'));
   const second = await launch();
   const next = await second.ready;
-  assert.equal((await (await fetch(next.url + '/api/ping')).json()).home, folder);
+  assert.equal((await (await fetch(next.url + '/api/ping')).json()).home, path.join(folder, 'Lapka'));
   const state = await (await fetch(next.url + '/api/state')).json();
-  assert.equal(state.positions['show/1/original'].t, 42);
+  assert.equal(state.positions['show/1'].t, 42);
   second.child.stdin.end();
   assert.equal((await second.exited)[0], 0);
 }));
@@ -71,6 +71,23 @@ for (const stop of ['SIGTERM', 'SIGINT', 'quit']) test('desktop shuts down its l
   else app.child.kill(stop);
   assert.equal((await app.exited)[0], 0);
   await assert.rejects(fetch(url + '/api/ping'));
+}));
+
+test('a bundled desktop rejects source updates while its server stays available', () => using(async (data, launch) => {
+  const appRoot = path.join(data, 'Lapka.app/Contents/Resources/app');
+  await fsp.mkdir(appRoot, { recursive: true });
+  await fsp.cp(path.join(root, 'core'), path.join(appRoot, 'core'), { recursive: true });
+  await fsp.copyFile(path.join(root, 'package.json'), path.join(appRoot, 'package.json'));
+  await fsp.symlink(path.join(root, 'node_modules'), path.join(appRoot, 'node_modules'));
+  const app = await launch(0, appRoot);
+  const { url } = await app.ready;
+  const response = await fetch(url + '/api/update/start?tag=v9.0.0', { method: 'POST', headers: { 'x-lapka': '1' } });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /DMG/);
+  assert.equal((await fetch(url + '/api/ping')).status, 200);
+  await fsp.access(path.join(appRoot, 'core/desktop.mjs'));
+  app.child.stdin.end();
+  assert.equal((await app.exited)[0], 0);
 }));
 
 test('an occupied port reports failure without terminating the other service', () => using(async (_, launch) => {

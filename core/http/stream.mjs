@@ -1,5 +1,6 @@
 /* The same media delivery for the local player and the scoped AirPlay listener. */
 import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { contentType } from '../deliver/index.mjs';
 
 export async function serveStream(req, res, { delivery, entry, kind, target, transform = text => text }) {
@@ -24,6 +25,5 @@ export async function serveStream(req, res, { delivery, entry, kind, target, tra
   if (req.method === 'HEAD' || !origin.body) { await origin.body?.cancel(); return res.end(); }
   const body = Readable.fromWeb(origin.body);
   res.once('close', () => body.destroy());
-  body.on('error', e => res.destroy(e));
-  return body.pipe(res);
+  return pipeline(body, res).catch(() => { if (!res.writableEnded) res.destroy(); });
 }

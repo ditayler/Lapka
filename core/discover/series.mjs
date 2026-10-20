@@ -10,6 +10,8 @@ import { textOf } from './text.mjs';
 
 const SEO_HEAD = /^\s*(?:watch|ver|смотреть)\s+(?:anime\s+|аниме\s+)?(?=\S)/i;
 const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
+/* «Название» in a window's title: the quotes are the site's, not the name's */
+const unquote = s => String(s || '').replace(/^[«"“„‘']+|[»"”“’']+$/g, '').trim();
 
 /* "Название — Сайт", "Название | Сайт", "Название - смотреть онлайн" */
 const stripSite = t => clean(t).split(/\s+[|—–]\s+|\s+-\s+/)[0]
@@ -22,6 +24,15 @@ export function findTitle(doc, { profile } = {}) {
   add(doc.querySelector('meta[property="og:title"]')?.getAttribute('content'), 'og:title', 0.9, 'meta[property="og:title"]');
   const h1 = doc.querySelector('h1'); if (h1) add(textOf(h1), 'h1', 0.8, 'h1');
   add(stripSite(doc.querySelector('title')?.textContent), 'title', 0.5, 'title');
+  /* the name in the page's structured data: the site's own word, written for machines */
+  for (const s of doc.querySelectorAll('script[type="application/ld+json"]')) {
+    let d; try { d = JSON.parse(s.textContent); } catch { continue; }
+    for (const node of (Array.isArray(d) ? d : [d]).flatMap(x => x && x['@graph'] ? x['@graph'] : [x])) {
+      if (!node || typeof node !== 'object' || typeof node.name !== 'string') continue;
+      const type = String(Array.isArray(node['@type']) ? node['@type'][0] : node['@type'] || '');
+      if (/^(TVSeries|TVSeason|Movie|VideoObject|CreativeWorkSeries|Series)$/i.test(type)) add(node.name, 'ld+json', 0.85, 'script[type="application/ld+json"]');
+    }
+  }
   /* "Клинок, рассекающий демонов смотреть на джутсу" in og:title and
      "Клинок, рассекающий демонов" in the heading: the heading is the
      name, the rest is a tail for search engines */
@@ -31,10 +42,10 @@ export function findTitle(doc, { profile } = {}) {
      "Watch", is the name and the rest a tail for search engines. Not
      when the shorter one is the episode's own line ("Эпизод 8"). */
   const og = out.find(c => c.by === 'og:title');
-  const core = og ? og.value.replace(SEO_HEAD, '').toLowerCase() : '';
+  const core = og ? unquote(og.value.replace(SEO_HEAD, '')).toLowerCase() : '';
   for (const other of out) {
     if (!og || other === og || other.by === 'profile') continue;
-    const v = other.value.toLowerCase();
+    const v = unquote(other.value).toLowerCase();
     if (og.value.length > other.value.length && v.length >= 4 && core.startsWith(v) && numberFromText(other.value) === null) other.confidence = Math.max(other.confidence, 0.95);
   }
   out.sort((a, b) => b.confidence - a.confidence);
@@ -130,13 +141,16 @@ export function findCurrentEpisode(doc, url) {
 /* "2 сезон", "Season 2", "2nd season", "S2", or a bare number at the
    end of a title ("Богиня благословляет этот прекрасный мир 2",
    "Этот Замечательный Мир! 3 (OVA)"): the season a title names */
-const SEASON = [/(\d{1,2})\s*-?\s*(?:й|ой|ый)?\s*сезон/i, /сезон\s*№?\s*(\d{1,2})(?!\d)/i, /season\s*(\d{1,2})/i, /(\d{1,2})(?:st|nd|rd|th)\s+season/i, /\b(?:part|часть)\s*(\d{1,2})(?!\d)/i, /\bS(\d{1,2})\b(?!\d)/];
+const SEASON = [/(\d{1,2})\s*-?\s*(?:й|ой|ый)?\s*сезон/i, /сезон\s*№?\s*(\d{1,2})(?!\d)/i, /season\s*(\d{1,2})/i, /(\d{1,2})(?:st|nd|rd|th)\s+season/i, /\b(?:part|часть)\s*(\d{1,2})(?!\d)/i, /\bS(\d{1,2})\b(?!\d)/, /(?:^|[\s[(])(?:ТВ|TV)-(\d{1,2})(?!\d)/i];
 
 /* "neobjatnyj-okean-sezon-3", "one_piece_season_2", "…/s2/": the season an address names */
 const SEASON_PATH = /(?:^|[-_/])(?:sezon|season|s)[-_]?(\d{1,2})(?=[-_/.]|$)/i;
 const SEASON_PATH_REV = /(?:^|[-_/])(\d{1,2})[-_](?:sezon|season)(?=[-_/.]|$)/i;
 export function seasonFromUrl(url) {
   let u; try { u = new URL(url); } catch { return null; }
+  /* "?season=3": a page that holds every season, looked at as one of them */
+  const q = Number(u.searchParams.get('season'));
+  if (Number.isInteger(q) && q > 0 && q < 100) return q;
   const p = u.pathname.toLowerCase();
   const m = SEASON_PATH.exec(p) || SEASON_PATH_REV.exec(p);
   return m ? Number(m[1]) : null;
@@ -146,7 +160,7 @@ export function seasonFromUrl(url) {
    океан, Сезон 3 (2026) все серии онлайн". The name is what is left
    once the year in brackets and the tail of watch-words go; the year
    is kept. */
-const SEO_TAIL = /\s*(?:[-—–|:·,]\s*)?(?:все\s+серии(?:\s+подряд)?|смотреть(?:\s+аниме)?(?:\s+онлайн)?|аниме\s+онлайн|онлайн|в\s+хорошем\s+качестве|бесплатно|в\s+hd|hd|watch\s+online|online|free|english\s+(?:subbed|dubbed)|(?:eng\s+)?(?:subbed|dubbed)|anime\s+free|at\s+\w+|sub\s+espa[ñn]ol|en\s+espa[ñn]ol|online\s+gratis|gratis|с\s+(?:русскими\s+)?субтитрами|все\s+серии)\s*$/i;
+const SEO_TAIL = /\s*(?:[-—–|:·,]\s*)?(?:во\s+всех\s+озвучках|в\s+озвучке\s+[^\s|]+|все\s+серии(?:\s+подряд)?|смотреть(?:\s+аниме)?(?:\s+онлайн)?|аниме\s+онлайн|онлайн|в\s+(?:хорошем|hd|высоком|отличном)\s+качестве|бесплатно|в\s+hd|hd|watch\s+online|online|free|english\s+(?:subbed|dubbed)|(?:eng\s+)?(?:subbed|dubbed)|anime\s+free|at\s+\w+|sub\s+espa[ñn]ol|en\s+espa[ñn]ol|online\s+gratis|gratis|с\s+(?:русскими\s+)?субтитрами|все\s+серии)\s*$/i;
 export function tidyTitle(text, host = '') {
   let t = String(text || '').replace(SEO_HEAD, '');
   let year = null;
@@ -155,14 +169,19 @@ export function tidyTitle(text, host = '') {
   const tail = /\s*[—–|-]\s*([\p{L}\d.]+)\s*$/u.exec(t);
   if (site.length >= 3 && tail) { const w = tail[1].toLowerCase().replace(/\./g, ''); if (w.includes(site) || site.includes(w)) t = t.slice(0, tail.index); }
   t = t.replace(/\s*\(((?:19|20)\d{2})\)\s*/g, (_, y) => { year = year || Number(y); return ' '; });
+  /* "(сериал, 1-13,14,15 сезон)", "(TV Series)": a bracket that says what the page holds, not what it is called */
+  t = t.replace(/\s*\((?=[^()]*(?:сериал|сезон|season|series))[^()]*\)\s*/gi, ' ');
   for (let i = 0; i < 6; i++) { const was = t; t = t.replace(SEO_TAIL, ''); if (t === was) break; }
   t = t.replace(/\s+/g, ' ').replace(/[\s,:·|—–-]+$/g, '').trim();
+  t = unquote(t);
   return { title: t || String(text || '').trim(), year };
 }
 const TRAILING = /(?:^|\s)(\d{1,2})(?:\s*\((?:OVA|ONA|TV|special)\))?\s*$/i;
 /* bare: whether a number at the end counts; it does in a title, not in a link ("3" in a strip of episodes) */
 export function seasonFromText(text, { bare = true } = {}) {
   const t = String(text || '');
+  /* "1-13,14,15 сезон": a run of seasons names them all, not one */
+  if (/\d\s*[-–,]\s*\d{1,2}\s*(?:й|ой|ый)?\s*(?:сезон|season)/i.test(t)) return null;
   for (const re of SEASON) { const m = re.exec(t); if (m) return Number(m[1]); }
   if (bare) { const m = TRAILING.exec(t); if (m) return Number(m[1]); }
   return null;
@@ -252,6 +271,19 @@ export function findFranchise(doc, url, ownSeason = null, title = '') {
    otherwise. */
 const FRANCHISE_HEAD = /^(франшиза|все части|порядок просмотра|хронология|связанн|franchise|watch order|related)/i;
 const YEAR = /^\s*((?:19|20)\d{2})\s*$/;
+/* The year of a part, as a leaf of the block writes it: a bare year, or a
+   date ("5 октября 2015", "2015-10-05", "05.10.2015", "Oct 5, 2015"), or
+   the datetime of a <time>. Nothing looser: a count that happens to look
+   like a year is not a year. */
+const DATE_LEAF = /^\s*(?:\d{1,2}\s+\p{L}+\.?\s+((?:19|20)\d{2})|\p{L}+\.?\s+\d{1,2},?\s+((?:19|20)\d{2})|((?:19|20)\d{2})-\d{2}-\d{2}|\d{2}\.\d{2}\.((?:19|20)\d{2}))\s*(?:г\.)?\s*$/u;
+function yearOfLeaf(el) {
+  const text = el.textContent || '';
+  let m = YEAR.exec(text); if (m) return Number(m[1]);
+  m = DATE_LEAF.exec(text); if (m) return Number(m[1] || m[2] || m[3] || m[4]);
+  const dt = el.tagName === 'TIME' ? el.getAttribute('datetime') || '' : '';
+  m = /((?:19|20)\d{2})/.exec(dt); if (m && dt.length <= 24) return Number(m[1]);
+  return null;
+}
 const kindOfName = name => /фильм|movie|film/i.test(name) ? 'movie' : /\b(ova|ona)\b/i.test(name) ? 'ova' : /спешл|special/i.test(name) ? 'special' : 'tv';
 export function franchiseFromBlock(doc, url, title = '', own = {}) {
   const page = (() => { try { const u = new URL(url); return u.origin + u.pathname.replace(/\/+$/, ''); } catch { return url; } })();
@@ -265,8 +297,27 @@ export function franchiseFromBlock(doc, url, title = '', own = {}) {
          The year may sit a few levels below the item ("Сериал / 2024"
          under the name): the item is the nearest ancestor of the year
          that holds one link, or none. */
-      const years = [...up.querySelectorAll('*')].filter(el => !el.children.length && YEAR.test(el.textContent || ''));
-      if (!years.length) continue;
+      const years = [...up.querySelectorAll('*')].filter(el => !el.children.length && yearOfLeaf(el) !== null);
+      /* no years: a plain list of links, this page among them, is the
+         franchise in the site's order (a season a part, by its name) */
+      if (!years.length) {
+        for (const list of up.querySelectorAll('ul, ol')) {
+          if (head.contains(list)) continue;
+          const rows = [...list.children];
+          if (rows.length < 2 || !rows.every(li => li.querySelectorAll('a[href]').length === 1)) continue;
+          const items = rows.map(li => {
+            const a = li.querySelector('a[href]');
+            const name = clean(textOf(a) || a.getAttribute('title') || a.querySelector('img')?.getAttribute('alt'));
+            let abs; try { abs = new URL(a.getAttribute('href'), url).toString(); } catch { abs = null; }
+            return { title: name, url: abs, href: same(a.getAttribute('href')), year: null, kind: kindOfName(name) };
+          }).filter(it => it.title && it.href);
+          const self = items.find(it => it.href === page);
+          if (!self || items.length < 2) continue;      // a list without this page in it is a list of something else
+          if (own.kind) self.kind = own.kind;
+          return items.map((it, i) => ({ order: i + 1, title: it.title, url: it === self ? String(url).replace(/#.*$/, '') : it.url, year: it.year, kind: it.kind, self: it === self }));
+        }
+        continue;
+      }
       const items = [];
       const yearsIn = el => years.filter(y => el.contains(y)).length;
       for (const y of years) {
@@ -284,11 +335,13 @@ export function franchiseFromBlock(doc, url, title = '', own = {}) {
         const hrefs = new Set(links.map(a => same(a.getAttribute('href'))).filter(Boolean));
         if (hrefs.size > 1) continue;   // several parts inside: not one item
         const a = links[0] || null;
-        const name = clean(a ? links.map(l => textOf(l) || l.getAttribute('title') || l.querySelector('img')?.getAttribute('alt')).find(Boolean) : (item.textContent || '').replace(y.textContent, ''));
+        /* the year may sit inside the link ("2016 · Name" as one link): it is the year, not a part of the name */
+        const unYear = s => String(s || '').replace(y.textContent, ' ');
+        const name = clean(a ? links.map(l => unYear(textOf(l)) || l.getAttribute('title') || l.querySelector('img')?.getAttribute('alt')).map(s => String(s || '').trim()).find(Boolean) : unYear(item.textContent));
         if (!name) continue;
         const href = a ? [...hrefs][0] : null;
         if (a && !href) continue;
-        items.push({ title: name, url: a ? new URL(a.getAttribute('href'), url).toString() : null, href, year: Number(YEAR.exec(y.textContent)[1]), kind: kindOfName(name) });
+        items.push({ title: name, url: a ? new URL(a.getAttribute('href'), url).toString() : null, href, year: yearOfLeaf(y), kind: kindOfName(name) });
       }
       if (!items.length) continue;
       /* this page: the item linking to it; else the one item without a
@@ -298,6 +351,7 @@ export function franchiseFromBlock(doc, url, title = '', own = {}) {
          what it knows of itself */
       let self = items.find(it => it.href === page) || items.find(it => !it.href) || items.find(it => title && it.title.toLowerCase() === String(title).toLowerCase());
       if (!self) { self = { title: String(title || ''), url: null, href: page, year: own.year || null, kind: own.kind || kindOfName(String(title || '')) }; items.push(self); }
+      else if (own.kind) self.kind = own.kind;   // what the page says of itself outranks a guess from its name
       /* a part without a link cannot be looked at, and is left out unless it is this page */
       const parts = items.filter(it => it === self || it.url).map(it => ({ title: it.title, url: it === self ? String(url).replace(/#.*$/, '') : it.url, year: it.year, kind: it.kind, self: it === self }));
       if (parts.length < 2) continue;
@@ -308,10 +362,94 @@ export function franchiseFromBlock(doc, url, title = '', own = {}) {
   return [];
 }
 
-/* What the page says of itself in schema.org data (JSON-LD): the year
-   it came out and what it is, a series or a film. */
+/* ── the facts a page states about its series ─────────────────
+   Beyond the name, the cover and the year: the genres, the studio,
+   the source it was adapted from, the age rating (a general one, or
+   the MPAA letters), how many episodes there are, the other names
+   it goes by. Read from the structured data first, then from the
+   labelled fields sites write ("Жанр: …", "Studio: …"). A field the
+   page does not state stays empty: nothing is guessed. */
+const FACT_LABELS = {
+  genres: /^(?:жанры?|genres?|géneros?|generi|gatunki?|türler?)$/i,
+  studio: /^(?:студия|студии|studios?|animation studio)$/i,
+  origin: /^(?:первоисточник|original source|source material|adapted from|основа)$/i,
+  age: /^(?:возраст|возрастной рейтинг|возрастное ограничение|age rating|age|rating)$/i,
+  mpaa: /^(?:рейтинг mpaa|mpaa|mpaa rating)$/i,
+  episodes: /^(?:серий|серии|эпизодов|эпизоды|episodes?|episodios?|épisodes?)$/i,
+  altTitles: /^(?:оригинальное название|другие названия|другое название|альтернативные названия|original title|alternative titles?|also known as|other titles?|romaji|japanese)$/i,
+};
+const MPAA = /^(?:G|PG|PG-13|R|NC-17|R\+|Rx|TV-(?:Y|Y7|G|PG|14|MA))$/i;
+const AGE = /(\d{1,2})\s*\+/;
+const splitList = v => String(v || '').split(/\s*[,;·|/]\s*|\s{2,}/).map(x => x.trim()).filter(x => x && x.length < 60);
+export function findFacts(doc) {
+  const out = { genres: [], studio: null, origin: null, age: null, mpaa: null, episodes: null, episodesTotal: null, altTitles: [] };
+  const takeRating = v => { const t = String(v || '').trim(); if (MPAA.test(t)) out.mpaa = out.mpaa || t.toUpperCase(); else { const m = AGE.exec(t); if (m) out.age = out.age || `${m[1]}+`; } };
+  /* structured data: the site's word for machines */
+  for (const s of doc.querySelectorAll('script[type="application/ld+json"]')) {
+    let d; try { d = JSON.parse(s.textContent); } catch { continue; }
+    for (const node of (Array.isArray(d) ? d : [d]).flatMap(x => x && x['@graph'] ? x['@graph'] : [x])) {
+      if (!node || typeof node !== 'object') continue;
+      const type = String(Array.isArray(node['@type']) ? node['@type'][0] : node['@type'] || '');
+      if (!/^(TVSeries|TVSeason|Movie|VideoObject|CreativeWorkSeries|Series)$/i.test(type)) continue;
+      for (const g of [].concat(node.genre || [])) if (typeof g === 'string') out.genres.push(g.trim());
+      for (const a of [].concat(node.alternateName || [])) if (typeof a === 'string') out.altTitles.push(a.trim());
+      if (node.contentRating) takeRating(node.contentRating);
+      const n = Number(node.numberOfEpisodes); if (Number.isFinite(n) && n > 0) out.episodesTotal = n;
+      for (const c of [].concat(node.productionCompany || [])) { const name = typeof c === 'string' ? c : c && c.name; if (name && !out.studio) out.studio = String(name).trim(); }
+    }
+  }
+  /* labelled fields: the smallest element that reads "Label: value", or a label followed by its value */
+  const seen = new Set();
+  for (const el of doc.querySelectorAll('li, div, span, td, tr, dt, dd, p, b, strong')) {
+    const text = clean(el.textContent);
+    if (!text || text.length > 160 || seen.has(text)) continue;
+    const m = /^([^:：]{2,40})\s*[:：]\s*(.+)$/.exec(text);
+    let label, value;
+    if (m) { label = m[1].trim(); value = m[2].trim(); }
+    else if (/^(DT|B|STRONG)$/.test(el.tagName) && el.nextElementSibling) { label = text.replace(/\s*[:：]\s*$/, ''); value = clean(el.nextElementSibling.textContent); }
+    else continue;
+    if (!value) continue;
+    seen.add(text);
+    /* a list written as links has its items in the links; the text alone may run them together */
+    const links = [...(m ? el : el.nextElementSibling).querySelectorAll('a')].map(a => clean(a.textContent)).filter(x => x && x.length < 60);
+    const items = links.length >= 2 ? links : splitList(value);
+    if (FACT_LABELS.genres.test(label)) { for (const g of items) if (!out.genres.includes(g)) out.genres.push(g); }
+    else if (FACT_LABELS.studio.test(label)) out.studio = out.studio || items.join(', ');
+    else if (FACT_LABELS.origin.test(label)) out.origin = out.origin || value.slice(0, 60);
+    else if (FACT_LABELS.mpaa.test(label)) { const v = value.split(/\s/)[0]; if (MPAA.test(v)) out.mpaa = out.mpaa || v.toUpperCase(); }
+    else if (FACT_LABELS.age.test(label)) takeRating(value);
+    else if (FACT_LABELS.episodes.test(label)) {
+      const e = /(\d{1,4})(?:\s*(?:из|of|\/)\s*(\d{1,4}|\?+))?/.exec(value);
+      if (e) { if (e[2] && /^\d+$/.test(e[2])) { out.episodes = out.episodes ?? Number(e[1]); out.episodesTotal = out.episodesTotal ?? Number(e[2]); } else out.episodesTotal = out.episodesTotal ?? Number(e[1]); }
+    }
+    else if (FACT_LABELS.altTitles.test(label)) { for (const a of items) if (!out.altTitles.includes(a)) out.altTitles.push(a); }
+  }
+  out.genres = [...new Set(out.genres.filter(Boolean))].slice(0, 12);
+  out.altTitles = [...new Set(out.altTitles.filter(Boolean))].slice(0, 6);
+  return out;
+}
+
+/* What the page says of itself: in schema.org data (JSON-LD) the year
+   it came out and what it is, a series or a film; failing that, the
+   kind from the window's title and the year from a labelled field
+   ("Год выхода: 2024", "Year: 2024") as sites without structured data
+   write it. */
+const LABELLED_YEAR = /^(?:год(?:\s+(?:выхода|выпуска|производства))?|year|release(?:\s+year)?|дата выхода)\s*:?\s*((?:19|20)\d{2})\b/i;
 export function findSelf(doc) {
   const out = { year: null, kind: null };
+  /* the window's title often names the kind in its tail ("… смотреть аниме
+     фильм онлайн", "… anime series online"); og:type does not: sites put
+     "movie" on every page. Only a title that says one and not the other counts. */
+  const tail = clean(doc.querySelector('title')?.textContent || '').toLowerCase();
+  const film = /(?:^|\s)(?:фильм|movie|film)(?:\s|$)/.test(tail), serial = /(?:^|\s)(?:сериал|series|tv)(?:\s|$)/.test(tail);
+  if (film !== serial) out.kind = film ? 'movie' : 'tv';
+  /* the smallest element that reads "Год выхода: 2024", label and value together, in whatever tags */
+  for (const el of doc.querySelectorAll('li, div, span, td, tr, dt, dd, p')) {
+    const text = clean(el.textContent);
+    if (text.length > 60) continue;
+    const m = LABELLED_YEAR.exec(text);
+    if (m) { out.year = Number(m[1]); break; }
+  }
   for (const s of doc.querySelectorAll('script[type="application/ld+json"]')) {
     let d; try { d = JSON.parse(s.textContent); } catch { continue; }
     for (const node of (Array.isArray(d) ? d : [d]).flatMap(x => x && x['@graph'] ? x['@graph'] : [x])) {
@@ -320,8 +458,8 @@ export function findSelf(doc) {
       if (!/^(TVSeries|TVSeason|Movie|VideoObject|CreativeWorkSeries|Series)$/i.test(type)) continue;
       const date = node.datePublished || node.startDate || node.dateCreated || '';
       const y = /^(19|20)\d{2}/.exec(String(date));
-      if (y && !out.year) out.year = Number(y[0]);
-      if (!out.kind) out.kind = /Movie/i.test(type) ? 'movie' : /TV|Series/i.test(type) ? 'tv' : null;
+      if (y) out.year = Number(y[0]);                        // structured data outranks a labelled field
+      out.kind = /Movie/i.test(type) ? 'movie' : /TV|Series/i.test(type) ? 'tv' : out.kind;
     }
   }
   return out;

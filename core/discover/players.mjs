@@ -23,6 +23,8 @@ const EMBED_ATTRS = ['data-embed', 'data-src', 'data-url', 'data-iframe', 'data-
 const SCRIPT_URL_KEYS = ['remote', 'url', 'src', 'embed', 'link', 'file', 'iframe', 'code'];
 const SCRIPT_NAME_KEYS = ['server', 'name', 'title', 'player', 'host', 'provider'];
 const SCRIPT_DUB_KEYS = ['dub', 'dubbing', 'translation', 'voice', 'audio', 'language'];
+/* hosts that are players by name: an address of theirs in a script needs no label beside it to count */
+const PLAYER_HOST = /kodik|aniboom|alloha|sibnet|cdnvideohub|streamtape|mp4upload|streamwish|filemoon|dood|vidhide|mixdrop|vk\.com|ok\.ru/i;
 /* data-src is how images load lazily too: on a picture element, or
    one that calls itself a picture, or with a picture's address, it is
    an image; on a frame, a video or a switch item it is a player */
@@ -52,6 +54,25 @@ const DEFERRED = [{
   url: (v, page) => new URL('/engine/ajax/controller.php?' + v, page).toString(),
   id: v => ((/(^|&)mod=([\w-]+?)(-player)?(&|$)/i.exec(v) || [])[2] || 'player').toLowerCase(),
 }];
+
+/* What the engine answers for a deferred player: JSON naming the address
+   (a string, or under data/url/src/iframe), JSON about the player (its
+   address, or the ids of a CVH player dropped in as an element, which get
+   the element's own address), the iframe itself, or the bare address. */
+export function deferredAnswer(body) {
+  body = String(body || '').trim();
+  let found = null;
+  try {
+    const j = JSON.parse(body);
+    const d = typeof j === 'string' ? j : j.data ?? j.url ?? j.src ?? j.iframe ?? null;
+    if (d && typeof d === 'object') {
+      if (d.kind === 'cvh' && d.title_id) { const q = new URLSearchParams({ title_id: d.title_id }); if (d.pub_id) q.set('pub', d.pub_id); if (d.aggregator) q.set('aggr', d.aggregator); found = 'https://player.cdnvideohub.com/embed?' + q; }
+      else found = d.src || d.url || d.iframe || null;
+    } else found = d;
+  } catch { /* not JSON */ }
+  if (!found) found = /<iframe[^>]+src=["']([^"']+)["']/i.exec(body)?.[1] || (/^(https?:)?\/\/\S+$/.test(body) ? body : null);
+  return found && typeof found === 'string' ? found : null;
+}
 
 export const streamKind = u => /\.m3u8(\?|$)/i.test(u) ? 'hls' : /\.mpd(\?|$)/i.test(u) ? 'dash' : /\.mp4(\?|$)/i.test(u) ? 'mp4' : null;
 
@@ -97,6 +118,8 @@ export function findPlayers(doc, url, { profile } = {}) {
   const seen = new Map();
   const add = (embed, kind, where, extra = {}) => {
     if (!embed) return null;
+    /* a bare site address, no path and no query ("https://site.example/"), names a site, not a player */
+    if (/^https?:\/\/[^/?#]+\/?$/i.test(embed)) return null;
     let p = seen.get(embed);
     if (!p) {
       p = { id: playerId(embed, url), kind, url: embed, dubLabel: null, playerLabel: null, stream: streamKind(embed), where };
@@ -110,6 +133,18 @@ export function findPlayers(doc, url, { profile } = {}) {
 
   /* what is on the page right now */
   for (const f of doc.querySelectorAll('iframe')) add(abs(f.getAttribute('src') || f.getAttribute('data-src')), 'iframe', 'iframe');
+  /* a player dropped in as an element with its ids in attributes: the
+     CVH <video-player>. It gets an address of the player's own carrying
+     them, which its extractor reads; the page's own ?season=N goes along,
+     the way a page holding every season in one player is looked at */
+  for (const el of doc.querySelectorAll('video-player[data-title-id]')) {
+    const q = new URLSearchParams({ title_id: el.getAttribute('data-title-id') });
+    if (el.getAttribute('data-publisher-id')) q.set('pub', el.getAttribute('data-publisher-id'));
+    if (el.getAttribute('data-aggregator')) q.set('aggr', el.getAttribute('data-aggregator'));
+    let season = null; try { season = Number(new URL(url).searchParams.get('season')) || null; } catch { /* no address */ }
+    if (season) q.set('season', String(season));
+    add('https://player.cdnvideohub.com/embed?' + q, 'element', 'video-player');
+  }
   for (const v of doc.querySelectorAll('video')) {
     add(abs(v.getAttribute('src') || v.getAttribute('data-src')), 'video', 'video');
     for (const s of v.querySelectorAll('source')) add(abs(s.getAttribute('src')), 'video', 'video source');
@@ -121,6 +156,20 @@ export function findPlayers(doc, url, { profile } = {}) {
     let u; try { u = d.url(v, url); } catch { continue; }
     const p = add(u, 'deferred', `[${d.attr}]`);
     if (p) p.id = d.id(v);
+  }
+  /* The same engine's newer way: the player block carries the entry's
+     id (data-player-anime-id, data-player-post-id…) and holds empty
+     slots (data-player-slot="0", "1"…) that a relay frame fills after
+     the page loads, asking the engine for mod=player&id=…&slot=N. The
+     slot's title names the player ("Плеер …") when it has one. */
+  for (const slot of doc.querySelectorAll('[data-player-slot]')) {
+    const block = slot.closest('[data-player-anime-id], [data-player-post-id], [data-player-news-id], [data-player-id]');
+    const id = block && [...block.attributes].find(at => /^data-player-(?:[\w-]+-)?id$/.test(at.name))?.value;
+    if (!id) continue;
+    const n = slot.getAttribute('data-player-slot');
+    let u; try { u = new URL(`/engine/ajax/controller.php?mod=player&id=${encodeURIComponent(id)}&slot=${encodeURIComponent(n)}`, url).toString(); } catch { continue; }
+    const p = add(u, 'deferred', '[data-player-slot]');
+    if (p) { const name = (slot.getAttribute('data-player-title') || '').replace(/^(?:плеер|player)\s+/i, '').trim(); p.id = (name || `slot ${n}`).toLowerCase(); }
   }
   for (const s of doc.querySelectorAll('script:not([src])')) {
     for (const m of s.textContent.matchAll(STREAM_RE)) add(abs(m[0]), 'script', 'script');
@@ -136,7 +185,8 @@ export function findPlayers(doc, url, { profile } = {}) {
       if (!embed) continue;
       const name = SCRIPT_NAME_KEYS.map(k => o[k]).find(v => typeof v === 'string' && v.trim());
       const dub = SCRIPT_DUB_KEYS.map(k => o[k]).find(v => typeof v === 'string' && v.trim());
-      if (!name && !dub) continue;
+      /* no name beside it: still a player when the host is one ({"link":"//kodikplayer.com/season/…","list":[1,2,3]}) */
+      if (!name && !dub) { let host = ''; try { host = new URL(embed).hostname; } catch { /* not an address */ } if (PLAYER_HOST.test(host)) add(embed, 'script', 'script object'); continue; }
       fromScripts.push({ embed, name: name ? clean(name) : null, dub: dub ? clean(dub) : null });
     }
   }

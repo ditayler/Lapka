@@ -98,12 +98,13 @@ function appFlow() {
   button.classList = { toggle() {} }; button.setAttribute = () => {};
   const context = { window: {}, Date, video, state, calls,
     playToken: 0, sourceGeneration: 0, hls: null, dubsInfo: null, skipNow: null, autoSwitch: false,
+    loaded: null, restoredIdle: false,
     skipEl: {}, endCard: node(), emptyEl: node(), stage: node(), ghostName: {},
     cur: () => state.current, idxOf: it => state.list.indexOf(it),
     fadeOut: () => Promise.resolve(), fadeIn: () => () => {},
     posKey: () => 'position', loadSource: (it, src) => calls.push([it.name, src.play]),
   };
-  for (const name of ['hideNotice', 'paintTitle', 'paintActive', 'syncAudioButton', 'syncStatus', 'mediaMeta', 'revealCurrent', 'deckShow', 'syncSubsButton', 'syncQualityButton', 'applySubs', 'prefetchNext', 'hideProgress', 'render']) context[name] = () => {};
+  for (const name of ['diary', 'markPos', 'hidePauseInfo', 'hideNotice', 'paintTitle', 'paintActive', 'syncAudioButton', 'syncStatus', 'mediaMeta', 'revealCurrent', 'deckShow', 'syncSubsButton', 'syncQualityButton', 'applySubs', 'prefetchNext', 'hideProgress', 'render']) context[name] = () => {};
   vm.createContext(context);
   vm.runInContext(src, context);
   const native = app.slice(app.indexOf('  onNative: url => {') + '  onNative: url => {'.length, app.indexOf('\n  onLocal:'));

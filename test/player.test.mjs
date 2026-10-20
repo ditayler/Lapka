@@ -266,8 +266,43 @@ describe('choosing a dub', { skip }, () => {
     ok(r, 'dub'); assert.deepEqual(r.errors, []);
     assert.notEqual(r.before, 'JAM');
     assert.equal(r.after, 'JAM');
-    assert.match(r.meta, /embed\/beta/);
+    assert.match(r.meta, /\d+ sources?/, 'the row counts the sources of the dub in play, not the player');
     assert.deepEqual(Object.values(r.dubs), ['jam']);
+  });
+});
+
+describe('choosing a quality', { skip }, () => {
+  let r, home;
+  before(async () => {
+    home = await fsp.mkdtemp(path.join(os.tmpdir(), 'lapka-home-'));
+    r = await openLapka('quality', WAIT + `
+      await until('boot', () => !$('#empty').classList.contains('hide'));
+      $('#linkInput').value = site + '/s/qualities/ep-1';
+      $('#linkForm').requestSubmit();
+      await until('source', () => $('#video').getAttribute('src'));
+      const before = $('#video').getAttribute('src');
+      const labelBefore = $('#qualityLabel').textContent;
+      $('#btnQuality').click(); await __settled();
+      const items = $$('#qualityMenu .menu__item').map(b => b.querySelector('.menu__main').textContent);
+      $$('#qualityMenu .menu__item').find(b => b.querySelector('.menu__main').textContent === '480p').click();
+      await until('switched', () => $('#qualityLabel').textContent === '480p' && $('#video').getAttribute('src') !== before, 120);
+      const after = $('#video').getAttribute('src');
+      /* the player is handed Lapka's own addresses: the server says which quality each one is */
+      const looked = await (await fetch('/api/look?url=' + encodeURIComponent(site + '/s/qualities/ep-1'))).json();
+      const r = await (await fetch('/api/resolve?series=' + looked.series.id + '&episode=1')).json();
+      const plays = Object.fromEntries(r.streams.map(s => [s.quality, s.play]));
+      __report({ errors: window.__errors, before, labelBefore, items, after, labelAfter: $('#qualityLabel').textContent, hidden: $('#btnQuality').hidden, plays });
+    `, { site: site.base, budget: 20000, home });
+  });
+  after(async () => { if (home) await fsp.rm(home, { recursive: true, force: true }); });
+  test('the file that plays is the quality chosen, the best until then', () => {
+    ok(r, 'quality'); assert.deepEqual(r.errors, []);
+    assert.equal(r.hidden, false);
+    assert.equal(r.labelBefore, '720p');
+    assert.equal(r.before, r.plays['720p'], 'the best plays until a choice is made');
+    assert.deepEqual(r.items, ['Auto', '720p', '480p']);
+    assert.equal(r.labelAfter, '480p');
+    assert.equal(r.after, r.plays['480p'], 'the file playing is the one chosen, not only the label');
   });
 });
 
@@ -332,8 +367,8 @@ describe('the interface holds together', { skip }, () => {
     ok(r, 'ui'); assert.deepEqual(r.errors, []);
     assert.deepEqual(r.uneven, []);
     assert.equal(r.langs, 10);
-    assert.equal(r.cols, 3);
-    assert.equal(r.placeCol, true, 'the folder and the cache share the third column');
+    assert.equal(r.cols, 4);
+    assert.equal(r.placeCol, true, 'the folder and the cache share the storage column');
     assert.equal(r.drag, true, 'reordering by drag is off by default');
     assert.equal(r.lang, 'ru');
     assert.equal(r.ruTitle, 'Вставьте ссылку');

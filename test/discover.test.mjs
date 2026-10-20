@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { caseById } from './site/cases.mjs';
-import { qualityOf } from '../core/discover/players.mjs';
+import { qualityOf, deferredAnswer } from '../core/discover/players.mjs';
 import { renderSeries, renderEpisode } from './site/render.mjs';
 
 const BASE = 'http://127.0.0.1:8801';
@@ -68,7 +68,7 @@ describe('the synthetic site', () => {
     assert.deepEqual(r.players.map(p => [p.id, p.dubLabel]), [['embed/alpha', 'AniLibria'], ['embed/alpha', 'AniDub']]);
     assert.equal(r.switches.length, 1);
     assert.equal(r.switches[0].kind, 'dubs');
-    assert.ok(r.steps.some(s => s.includes('2 озвучки')), r.steps.join(' | '));
+    assert.ok(r.steps.some(s => s.key === 'foundDubs' && s.n === 2), JSON.stringify(r.steps));
   });
 
   test('an episode page with two players, dubs on the page for one and inside for the other', () => {
@@ -84,7 +84,7 @@ describe('the synthetic site', () => {
     assert.ok(beta, 'beta embed found');
     assert.equal(beta.dubLabel, null);
     assert.equal(beta.playerLabel, 'Плеер 2');
-    assert.ok(r.steps.some(s => s.includes('ждёт экстрактор')), r.steps.join(' | '));
+    assert.ok(r.steps.some(s => s.key === 'pending' && s.n === 1), JSON.stringify(r.steps));
   });
 
   test('an episode page with a video tag and an HLS source', () => {
@@ -99,7 +99,7 @@ describe('the synthetic site', () => {
 describe('seasons', () => {
   test('the season in a title', async () => {
     const { seasonFromText } = await import('../core/discover/series.mjs');
-    for (const [t, n] of [['Ван-Пис 2 сезон', 2], ['Re:Zero Season 3', 3], ['Bleach 2nd season', 2], ['Наруто', null], ['Сериал Сезоны 2 сезон', 2], ['S2 · Финал', 2], ['Богиня благословляет этот прекрасный мир 2', 2], ['Этот Замечательный Мир! 3 (OVA)', 3], ['Стальной алхимик 2003', null], ['Ван-Пис 1080p', null]])
+    for (const [t, n] of [['Ван-Пис 2 сезон', 2], ['Re:Zero Season 3', 3], ['Bleach 2nd season', 2], ['Наруто', null], ['Сериал Сезоны 2 сезон', 2], ['S2 · Финал', 2], ['Богиня благословляет этот прекрасный мир 2', 2], ['Этот Замечательный Мир! 3 (OVA)', 3], ['Стальной алхимик 2003', null], ['Ван-Пис 1080p', null], ['Дни Сакамото [ТВ-1]', 1], ['One Piece TV-2', 2], ['Сверхъестественное (сериал, 1-13,14,15 сезон)', null]])
       assert.equal(seasonFromText(t), n, t);
   });
   test('a series in two seasons: each page names the other, and knows which one it is', () => {
@@ -116,6 +116,59 @@ describe('seasons', () => {
     assert.equal(c2.series.franchise.length, 2);
     /* a page with a single season link is not a franchise */
     assert.deepEqual(seriesPage('links').franchise, []);
+  });
+  test('a block the site heads as related, a plain list of links with no years and this page among them: the parts in the site\'s order', () => {
+    const page = (self) => `<html><head><title>${self} - Site</title></head><body><h1>${self}</h1>
+<section><h2>Связанные релизы</h2><p>Эта подборка помогает следить за «${self}»</p>
+<ul><li><a href="/releases/rai">Рай</a></li><li><a href="/releases/rai-2nd-season">Рай 2</a></li><li><a href="/releases/rai-movie">Рай: Фильм</a></li></ul></section>
+<section><h2>Похожие релизы</h2><ul><li><a href="/releases/other">Другое</a></li><li><a href="/releases/more">Ещё</a></li></ul></section>
+</body></html>`;
+    const two = discover({ html: page('Рай 2'), url: 'https://site.example/releases/rai-2nd-season' });
+    assert.deepEqual(two.franchise.map(f => [f.order, f.title, f.kind, f.self]), [[1, 'Рай', 'tv', false], [2, 'Рай 2', 'tv', true], [3, 'Рай: Фильм', 'movie', false]]);
+    assert.equal(two.franchise[0].url, 'https://site.example/releases/rai');
+    assert.equal(two.season, 2);
+    const one = discover({ html: page('Рай'), url: 'https://site.example/releases/rai' });
+    assert.equal(one.season, 1, 'the earliest series of the franchise, unnumbered, is the first season');
+    /* a list under such a heading that does not hold this page is a list of something else */
+    const stranger = discover({ html: page('Рай 2').replace('/releases/rai-2nd-season', '/releases/elsewhere'), url: 'https://site.example/releases/rai-2nd-season' });
+    assert.deepEqual(stranger.franchise, []);
+  });
+});
+
+describe('the page\'s own word', () => {
+  test('a franchise block with the year inside each link outranks season links; the window title and a labelled year name the page', () => {
+    const html = `<html><head><meta property="og:type" content="movie"><title>Герой: Фильм смотреть аниме фильм онлайн</title></head><body>
+      <h1>Герой: Фильм</h1>
+      <ul class="info"><li><span>Год выхода:</span> <a href="/catalog/2024/">2024</a></li><li><span>Время:</span> 90 мин.</li></ul>
+      <div class="section"><div class="section__title"><span>Порядок</span> просмотра:</div><div class="items">
+        <div class="item"><a href="/1-geroj.html"><img alt="Герой"><div class="label">2016</div><div class="t">Герой</div></a></div>
+        <div class="item"><a href="/2-geroj-2.html"><img alt="Герой 2 сезон"><div class="label">2017</div><div class="t">Герой 2 сезон</div></a></div>
+        <div class="item"><a href="/3-geroj-ova.html"><img alt="Герой OVA"><div class="label">2018</div><div class="t">Герой OVA</div></a></div>
+      </div></div>
+      <div class="also"><a href="/77-drugoe-3-sezon.html">Другое 3 сезон</a></div>
+    </body></html>`;
+    const r = discover({ html, url: 'https://site.test/9-geroj-film.html' });
+    assert.equal(r.year, 2024);
+    assert.equal(r.kind_, 'movie');
+    assert.equal(r.season, null, 'a place in a block ordered by year is not a season');
+    /* og:type says movie on every page of such sites: the title's own word decides */
+    const tv = discover({ html: html.replace('<title>Герой: Фильм смотреть аниме фильм онлайн</title>', '<title>Герой 2 сезон смотреть аниме сериал онлайн</title>').replace('<h1>Герой: Фильм</h1>', '<h1>Герой 2 сезон</h1>'), url: 'https://site.test/2-geroj-2.html' });
+    assert.equal(tv.kind_, 'tv');
+    assert.equal(tv.season, 2);
+    /* the years written as dates beside each link, in a plain list under the heading */
+    const dated = `<html><head><title>Герой 2 сезон смотреть аниме сериал онлайн</title></head><body><h1>Герой 2 сезон</h1>
+      <h2>Франшиза аниме Герой 2 сезон 👇</h2><a href="/franchise/geroj/">Полный порядок просмотра: 3 части</a>
+      <ul><li><a href="/1-geroj.html">Герой</a><time datetime="21 декабря 2015"> — <i>5 октября 2015</i></time></li>
+      <li><a href="/2-geroj-2.html">Герой 2 сезон</a><time> — <i>10 апреля 2019</i></time></li>
+      <li><a href="/3-geroj-ova.html">Герой OVA</a><time> — <i>2020-03-27</i></time></li></ul></body></html>`;
+    const d = discover({ html: dated, url: 'https://site.test/2-geroj-2.html' });
+    assert.deepEqual(d.franchise.map(f => [f.order, f.title, f.year, f.self]), [[1, 'Герой', 2015, false], [2, 'Герой 2 сезон', 2019, true], [3, 'Герой OVA', 2020, false]]);
+    assert.deepEqual(r.franchise.map(f => [f.order, f.title, f.year, f.kind, f.self]), [
+      [1, 'Герой', 2016, 'tv', false], [2, 'Герой 2 сезон', 2017, 'tv', false], [3, 'Герой OVA', 2018, 'ova', false], [4, 'Герой: Фильм', 2024, 'movie', true],
+    ]);
+    const c = toContribution(r);
+    assert.equal(c.series.year, 2024);
+    assert.equal(c.series.kind, 'movie');
   });
 });
 
@@ -161,10 +214,10 @@ const WILD = `<!doctype html><html><head>
 <div class="breadcrumb"><a href="/">Главная</a> › <a href="/anime/">Аниме</a> › <a href="/anime/one-piece/">Ван-Пис</a></div>
 <h1>Ван-Пис Серия 5</h1>
 <div class="translations">
-  <div class="translations__item active" data-media-id="1" data-url="//kodik.info/seria/1001/abc/720p">AniLibria</div>
-  <div class="translations__item" data-media-id="2" data-url="//kodik.info/seria/1002/def/720p">Дримкаст</div>
+  <div class="translations__item active" data-media-id="1" data-url="//embed.example/seria/1001/abc/720p">AniLibria</div>
+  <div class="translations__item" data-media-id="2" data-url="//embed.example/seria/1002/def/720p">Дримкаст</div>
 </div>
-<iframe src="//kodik.info/seria/1001/abc/720p" allowfullscreen></iframe>
+<iframe src="//embed.example/seria/1001/abc/720p" allowfullscreen></iframe>
 <ul class="episodes">
   <li><a href="/anime/one-piece/1-seriya">Серия 1</a></li>
   <li><a href="/anime/one-piece/2-seriya">Серия 2</a></li>
@@ -193,12 +246,144 @@ describe('a page from the wild', () => {
     assert.deepEqual(r.episodes.items.map(e => e.number), [1, 2, 3, 4, 6]);
   });
   test('an external player named by its host, two dubs', () => {
-    assert.deepEqual(r.players.map(p => [p.id, p.dubLabel]), [['kodik.info', 'AniLibria'], ['kodik.info', 'Дримкаст']]);
+    assert.deepEqual(r.players.map(p => [p.id, p.dubLabel]), [['embed.example', 'AniLibria'], ['embed.example', 'Дримкаст']]);
     const c = toContribution(r);
     const ep = c.episodes.find(e => e.number === 5);
     assert.deepEqual(ep.dubs.map(d => d.name), ['AniLibria', 'Дримкаст']);
     const s = merge(createSeries({ sourceUrl: r.seriesUrl.value }), c);
     assert.deepEqual(s.episodes.find(e => e.number === 5).dubs.map(d => d.key), ['anilibria', 'dreamcast']);
+  });
+});
+
+/* A page whose players come after it loads: the block carries the entry's
+   id, the slots are empty, and a relay asks the engine for each one. */
+const SLOTS = `<html><head><title>Сериал 4 сезон</title></head><body><h1>Сериал 4 сезон</h1>
+<div class="tabs-block" data-player-anime-id="8521">
+  <div class="tabs-block__content" data-player-slot="0" data-player-title="Плеер Альфа"></div>
+  <div class="tabs-block__content" data-player-slot="1" data-player-title="Плеер Бета"></div>
+  <div class="tabs-block__content trl"><iframe src="https://www.youtube.com/embed/abc"></iframe></div>
+</div></body></html>`;
+describe('players fetched after the page loads', () => {
+  test('empty slots under the entry\'s id become deferred players, asked of the engine slot by slot, named by their titles', () => {
+    const r = discover({ html: SLOTS, url: 'https://dle.example/8521-serial-4-sezon.html' });
+    const deferred = r.players.filter(p => p.kind === 'deferred');
+    assert.deepEqual(deferred.map(p => [p.id, p.url]), [
+      ['альфа', 'https://dle.example/engine/ajax/controller.php?mod=player&id=8521&slot=0'],
+      ['бета', 'https://dle.example/engine/ajax/controller.php?mod=player&id=8521&slot=1'],
+    ]);
+  });
+  test('the engine\'s answer, in every shape it takes', () => {
+    assert.equal(deferredAnswer('{"success":true,"data":"https://embed.example/serial/1"}'), 'https://embed.example/serial/1');
+    assert.equal(deferredAnswer('{"status":true,"data":{"name":"Beta","kind":"iframe","src":"https://embed.example/serial/2"}}'), 'https://embed.example/serial/2');
+    assert.equal(deferredAnswer('<iframe src="https://embed.example/serial/3"></iframe>'), 'https://embed.example/serial/3');
+    assert.equal(deferredAnswer('https://embed.example/serial/4'), 'https://embed.example/serial/4');
+    assert.equal(deferredAnswer('{"status":false}'), null);
+  });
+});
+
+/* A page drawn by a script: no links to episodes, the episodes in the
+   framework's payload as data, each with its video by quality and its
+   opening and ending marked; the window's title in the site's quotes
+   with a tail, the name itself in the structured data. */
+const PAYLOAD = JSON.stringify({ alias: 'okean-3', title_main: 'Океан 3', year: 2026, episodes: [
+  { id: 1, ordinal: 1, name: '', duration: 1441, hls: { 480: 'https://cdn.example/v/1/480/a.m3u8?x=1', 720: 'https://cdn.example/v/1/720/a.m3u8?x=1', 1080: 'https://cdn.example/v/1/1080/a.m3u8?x=1' }, opening: { start: 55, stop: 145 }, ending: { start: 1335, stop: 1425 } },
+  { id: 2, ordinal: 2, name: 'Второй', duration: 1440, hls: { 480: 'https://cdn.example/v/2/480/b.m3u8', 720: 'https://cdn.example/v/2/720/b.m3u8' }, opening: null, ending: null },
+  { id: 3, ordinal: 3, name: '', duration: 1439, hls: { 720: 'https://cdn.example/v/3/720/c.m3u8' } },
+], dubs: [{ id: 7, studio: 'Другие', episodes_count: 3 }] });
+const NEXT = `<html><head><title>Смотреть «Океан 3» онлайн во всех озвучках бесплатно | next.example</title>
+<meta property="og:title" content="Смотреть «Океан 3» онлайн во всех озвучках бесплатно"/><meta property="og:type" content="video.tv_show"/>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"TVSeries","name":"Океан 3"}</script></head>
+<body><h1>Океан 3</h1><div id="app"></div>
+<script>self.__next_f=self.__next_f||[];self.__next_f.push([0])</script>
+<script>self.__next_f.push([1,${JSON.stringify('3:I[1234,[],""]\n')}])</script>
+<script>self.__next_f.push([1,${JSON.stringify('c:["$","div",null,{"children":["$","$L5",null,{"anime":' + PAYLOAD + '}]}]\n')}])</script>
+</body></html>`;
+
+describe('episodes in the page\'s data', () => {
+  const r = discover({ html: NEXT, url: 'https://next.example/anime/okean-3' });
+  test('the framework\'s payload is read: the episodes with their videos by quality, their marks, their durations', () => {
+    assert.equal(r.kind, 'series');
+    assert.equal(r.episodes.by, 'data');
+    assert.deepEqual(r.episodes.items.map(e => e.number), [1, 2, 3]);
+    assert.deepEqual(r.episodes.items[0].streams.map(s => [s.kind, s.quality]), [['hls', '480p'], ['hls', '720p'], ['hls', '1080p']]);
+    assert.deepEqual(r.episodes.items[0].marks, { opening: { start: 55, stop: 145 }, ending: { start: 1335, stop: 1425 } });
+    assert.equal(r.episodes.items[1].marks, null);
+    assert.equal(r.episodes.items[1].title, 'Второй');
+    assert.equal(r.episodes.items[2].duration, 1439);
+    assert.equal(r.players.length, 0, 'the videos of the episodes are not players of the page');
+  });
+  test('the name is the site\'s own word: the quotes and the tail of the window\'s title go, the structured data agrees', () => {
+    assert.equal(r.title.value, 'Океан 3');
+    assert.equal(r.season, 3);
+    assert.equal(r.kind_, 'tv');
+  });
+  /* the players' own way: a playlist of objects whose file lists the qualities in
+     one string, the addresses relative to the page and signed for hours, the
+     number only in the title */
+  const PLAYERJS = `<html><head><title>Рай 2 - Site</title><meta property="og:title" content="Рай 2"/></head><body><h1>Рай 2</h1>
+<script>(() => { const player = new Playerjs({ id: 'p', file: [{"file":"[480p]\\/video\\/pl\\/a480.m3u8?expires=1791956901\\u0026signature=aa,[720p]\\/video\\/pl\\/a720.m3u8?expires=1791956901\\u0026signature=bb or \\/video\\/pl\\/a720b.m3u8,[1080p]\\/video\\/pl\\/a1080.m3u8?expires=1791956901\\u0026signature=cc","title":"\\u042d\\u043f\\u0438\\u0437\\u043e\\u0434 1"},{"file":"[480p]\\/video\\/pl\\/b480.m3u8?expires=1791956901\\u0026signature=dd,[720p]\\/video\\/pl\\/b720.m3u8?expires=1791956901\\u0026signature=ee","title":"\\u042d\\u043f\\u0438\\u0437\\u043e\\u0434 2"}] }); })();</script>
+</body></html>`;
+  test('a player\'s playlist in a script: the qualities out of one string, the addresses made absolute, the expiry read, the number out of the title', () => {
+    const p = discover({ html: PLAYERJS, url: 'https://pl.example/releases/rai-2' });
+    assert.equal(p.kind, 'series');
+    assert.deepEqual(p.episodes.items.map(e => e.number), [1, 2]);
+    assert.equal(p.episodes.items[0].title, '', 'a title that only numbers the episode is no title');
+    assert.deepEqual(p.episodes.items[0].streams.map(s => [s.quality, s.url]), [['480p', 'https://pl.example/video/pl/a480.m3u8?expires=1791956901&signature=aa'], ['720p', 'https://pl.example/video/pl/a720.m3u8?expires=1791956901&signature=bb'], ['1080p', 'https://pl.example/video/pl/a1080.m3u8?expires=1791956901&signature=cc']]);
+    assert.equal(p.episodes.items[0].streams[0].expiresAt, 1791956901000);
+    assert.equal(p.title.value, 'Рай 2');
+    assert.equal(p.season, 2);
+    assert.equal(toContribution(p).episodes[1].dubs[0].sources[0].streams[1].expiresAt, 1791956901000);
+  });
+  test('into the catalog: every episode with its page as the player and the videos as its streams', () => {
+    const c = toContribution(r);
+    assert.equal(c.episodes.length, 3);
+    const ep = c.episodes[0];
+    assert.equal(ep.duration, 1441);
+    assert.deepEqual(ep.marks.opening, { start: 55, stop: 145 });
+    assert.equal(ep.dubs.length, 1);
+    assert.equal(ep.dubs[0].name, UNNAMED_DUB);
+    assert.deepEqual(ep.dubs[0].sources[0].streams.map(s => s.quality), ['480p', '720p', '1080p']);
+    assert.equal(ep.dubs[0].sources[0].player, 'page');
+    const s = createSeries({ sourceUrl: 'https://next.example/anime/okean-3' }); merge(s, c);
+    assert.equal(s.episodes.length, 3);
+    assert.equal(s.episodes[0].dubs[0].sources[0].streams.length, 3);
+    assert.deepEqual(s.episodes[0].marks.ending, { start: 1335, stop: 1425 });
+  });
+});
+
+/* The facts a page states of its series: in structured data and in
+   labelled fields, in whatever tags; what it does not state stays empty. */
+const FACTS = `<html><head><title>Рай - Site</title>
+<script type="application/ld+json">{"@type":"TVSeries","name":"Рай","alternateName":["Rai","楽園"],"genre":["Комедия","Приключения"],"contentRating":"16+","numberOfEpisodes":24,"productionCompany":{"@type":"Organization","name":"Studio Zero"}}</script>
+</head><body><h1>Рай</h1>
+<ul class="info"><li><b>Жанр:</b> Комедия, Сёнен</li><li>Первоисточник: Манга</li><li>Рейтинг MPAA: PG-13</li><li>Серий: 12 из 24</li><li>Другие названия: Rai, Paradise</li><li>Год выхода: 2024</li></ul>
+<dl><dt>Студия</dt><dd>Studio Zero</dd><dt>Возраст</dt><dd>16+</dd></dl>
+<div class="eps"><a href="/rai/1">1 серия</a> <a href="/rai/2">2 серия</a> <a href="/rai/3">3 серия</a></div>
+</body></html>`;
+describe('the facts a page states', () => {
+  const r = discover({ html: FACTS, url: 'https://site.example/rai' });
+  test('genres as a union, the studio, the source, both ratings, the episodes out of the planned, the other names', () => {
+    assert.deepEqual(r.facts.genres, ['Комедия', 'Приключения', 'Сёнен']);
+    assert.equal(r.facts.studio, 'Studio Zero');
+    assert.equal(r.facts.origin, 'Манга');
+    assert.equal(r.facts.age, '16+');
+    assert.equal(r.facts.mpaa, 'PG-13');
+    assert.deepEqual([r.facts.episodes, r.facts.episodesTotal], [12, 24]);
+    assert.deepEqual(r.facts.altTitles, ['Rai', '楽園', 'Paradise']);
+  });
+  test('into the catalog: the facts stated, the other names apart from the name; a page that states nothing gives nothing', () => {
+    const c = toContribution(r);
+    assert.deepEqual(c.series.facts, { genres: ['Комедия', 'Приключения', 'Сёнен'], studio: 'Studio Zero', origin: 'Манга', age: '16+', mpaa: 'PG-13', episodes: 12, episodesTotal: 24 });
+    assert.deepEqual(c.series.altTitles, ['Rai', '楽園', 'Paradise']);
+    const s = createSeries({ sourceUrl: 'https://site.example/rai' }); merge(s, c);
+    assert.deepEqual(s.facts.genres, ['Комедия', 'Приключения', 'Сёнен']);
+    assert.equal(s.facts.mpaa, 'PG-13');
+    merge(s, { origin: 'test', series: { facts: { genres: ['Драма'], studio: 'Other' } }, episodes: [] });
+    assert.deepEqual(s.facts.genres, ['Комедия', 'Приключения', 'Сёнен', 'Драма'], 'genres add up');
+    assert.equal(s.facts.studio, 'Studio Zero', 'the first word stands');
+    const bare = toContribution(discover({ html: '<html><head><title>Х</title></head><body><h1>Х</h1><a href="/x/1">1 серия</a><a href="/x/2">2 серия</a></body></html>', url: 'https://site.example/x' }));
+    assert.equal(bare.series.facts, undefined);
+    assert.equal(bare.series.altTitles, undefined);
   });
 });
 
@@ -220,63 +405,3 @@ describe('a profile as a hint', () => {
     assert.equal(fixed.profile, 'tricky.example');
   });
 });
-
-/* ── a real site, from its saved pages, with no adapter and no API ──
-   What the general reading gets out of aniliberty.top on its own: the
-   series page names the series and lists the episodes (their links
-   carry no number, the number is in the text of a card glued out of
-   spans); the episode page names its number in the title, not in the
-   uuid of its address; the page data holds the streams of every
-   episode, and only this episode's are taken. */
-/* the snapshots of real pages are kept outside the repository: without them this block is skipped */
-if (!fs.existsSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'snapshots', 'aniliberty'))) describe('aniliberty.top, read generally', { skip: 'the snapshots of real pages are kept outside the repository' }, () => {});
-else {
-const SNAP = path.join(path.dirname(fileURLToPath(import.meta.url)), 'snapshots', 'aniliberty');
-const snap = f => fs.readFileSync(path.join(SNAP, f), 'utf8');
-const REL = 'https://aniliberty.top/anime/releases/release/re-creators/episodes';
-const EPI = 'https://aniliberty.top/anime/video/episode/95b4eca9-789e-11ec-ae92-0242ac120002';
-
-describe('aniliberty.top, read generally', () => {
-  const rel = discover({ html: snap('release.html'), url: REL });
-  const epi = discover({ html: snap('episode.html'), url: EPI });
-
-  test('the release page is a series page with its episodes', () => {
-    assert.equal(rel.kind, 'series');
-    assert.equal(rel.title.value, 'Возрождающие');
-    assert.match(rel.cover.value, /^https:\/\/cdn\.anilibria\.top\/.*\.jpg$/);
-    assert.deepEqual(rel.episodes.items.map(e => e.number), Array.from({ length: 22 }, (_, i) => i + 1));
-    assert.equal(rel.episodes.items[21].title, 'Финал');
-    assert.match(rel.episodes.items[0].url, /\/anime\/video\/episode\/[0-9a-f-]{36}$/);
-    assert.ok(rel.episodes.confidence >= 0.9, String(rel.episodes.confidence));
-  });
-
-  test('the episode page knows which episode it is, from the title and not from the uuid', () => {
-    assert.equal(epi.kind, 'episode');
-    assert.equal(epi.episode.value, 8);
-    assert.match(epi.title.value, /Возрождающие/);
-  });
-
-  test('of the streams of every episode in the page data, this episode gets its own three', () => {
-    const c = toContribution(epi);
-    const ep = c.episodes.find(e => e.number === 8);
-    assert.equal(ep.dubs.length, 1);
-    assert.equal(ep.dubs[0].name, UNNAMED_DUB);
-    const streams = ep.dubs[0].sources[0].streams;
-    assert.deepEqual(streams.map(s => s.quality).sort(), ['1080p', '480p', '720p']);
-    for (const s of streams) assert.match(s.url, /\/3993\/8\//);
-  });
-
-  test('a profile names the dub the page does not', () => {
-    const r = discover({ html: snap('episode.html'), url: EPI, profile: { match: 'aniliberty.top', dub: 'AniLibria' } });
-    const ep = toContribution(r).episodes.find(e => e.number === 8);
-    assert.equal(ep.dubs[0].name, 'AniLibria');
-  });
-
-  test('qualities are read from a file name or a folder', () => {
-    assert.equal(qualityOf('https://x/v/720p.mp4'), '720p');
-    assert.equal(qualityOf('https://x/v/1080/abc.m3u8?x=1'), '1080p');
-    assert.equal(qualityOf('https://x/v/3993/8/480/abc.m3u8'), '480p');
-    assert.equal(qualityOf('https://x/v/index.m3u8'), null);
-  });
-});
-}

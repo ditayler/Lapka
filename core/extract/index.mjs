@@ -38,3 +38,18 @@ export async function loadExtractors(dir = path.join(HERE, 'players')) {
 export function extractorFor(extractors, url) {
   return extractors.find(x => x.match(url)) || null;
 }
+
+/* Doors known to be closed: players no extractor can open, tried and
+   documented (YouTube needs a browser's proof-of-work and a decoded
+   player script). Asking them costs a request and, when the host is
+   slow or unreachable, the whole connection timeout, once per page of
+   a franchise. They are refused at once and said so. */
+const CLOSED_DOORS = [
+  { host: /(^|\.)(youtube\.com|youtube-nocookie\.com|youtu\.be)$/i, why: 'closed door' },  // it plays only in a browser,
+  { host: /(^|\.)(gencit\.info|ceramet\.net)$/i, why: 'closed door' },                       // an aggregator's stub that unfolds only inside a frame
+  { host: /(^|\.)rutube\.ru$/i, why: 'closed door' },                                           // not read on principle (2026-10-17), as YouTube is not
+];
+export function closedDoor(url) {
+  let host; try { host = new URL(url).hostname; } catch { return null; }
+  return CLOSED_DOORS.find(d => d.host.test(host))?.why || null;
+}

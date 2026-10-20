@@ -111,7 +111,7 @@ final class WindowChrome: NSView, WKScriptMessageHandler, NSWindowDelegate {
           :root[data-macos-fullscreen], :root[data-macos]:has(:fullscreen) { --macos-controls:0px; }
           [data-macos] .queue__tools { padding-left:max(16px, var(--macos-controls)); gap:8px; }
           [data-macos] .workspace { --queue-w:504px; }
-          [data-macos] .workspace.queue-narrow { --queue-w:460px; }
+          [data-macos] .workspace.queue-narrow { --queue-w:504px; }
           [data-macos] .workspace:not(.queue-open) .titlechip,
           [data-macos] .info { padding-left:calc(36px + var(--macos-controls)); }
           [data-macos] .queue--empty .queue__about { padding-top:57px; }
@@ -119,7 +119,7 @@ final class WindowChrome: NSView, WKScriptMessageHandler, NSWindowDelegate {
             [data-macos] .workspace { --queue-w:709px; }
             [data-macos] .workspace.queue-narrow { --queue-w:504px; }
           }
-          @media (max-width:1100px) { [data-macos] .workspace { --queue-w:460px; } }
+          @media (max-width:1100px) { [data-macos] .workspace { --queue-w:504px; } }
           @media (max-width:820px) {
             [data-macos] .workspace, [data-macos] .workspace.queue-narrow { --queue-w:100vw; }
           }

@@ -43,14 +43,17 @@ const seasonsNav = (c, season) => c.layout.seasons
   : '';
 const seasonTitle = (c, season) => c.layout.seasons && season > 1 ? `${c.title} ${season} сезон` : c.title;
 
+/* the facts a case states of itself: structured data in the head, labelled fields in the body */
+const factsHead = c => c.facts ? `<script type="application/ld+json">${JSON.stringify({ '@type': 'TVSeries', name: c.title, alternateName: c.facts.altTitles || [], genre: c.facts.genres || [], contentRating: c.facts.age || undefined, numberOfEpisodes: c.facts.episodesTotal || undefined })}</script>` : '';
+const factsBody = c => c.facts ? `<ul class="facts">${[['Студия', c.facts.studio], ['Первоисточник', c.facts.origin], ['Рейтинг MPAA', c.facts.mpaa], ['Серий', c.facts.episodesTotal ? `${c.episodes} из ${c.facts.episodesTotal}` : null]].filter(([, v]) => v).map(([k, v]) => `<li>${k}: ${esc(v)}</li>`).join('')}</ul>` : '';
 export function renderSeries(c, season = 1) {
-  const head = `<meta property="og:image" content="/media/cover-${c.id}.jpg">`;
+  const head = `<meta property="og:image" content="/media/cover-${c.id}.jpg">` + factsHead(c);
   const prefix = season > 1 ? `/s/${c.id}/season-${season}` : `/s/${c.id}`;
   const title = seasonTitle(c, season);
   const list = c.layout.episodes === 'select'
     ? `<select id="episodes" onchange="location.href=this.value">\n${episodes(c).map(n => `<option value="${prefix}/ep-${n}">${n} серия</option>`).join('\n')}\n</select>`
     : `<ul class="episodes">\n${episodes(c).map(n => `<li><a href="${prefix}/ep-${n}">${n} серия</a></li>`).join('\n')}\n</ul>`;
-  return page({ title, head, body: `<h1>${esc(title)}</h1>\n<p class="meta">Год: 2024 · Серий: ${c.episodes}</p>\n${seasonsNav(c, season)}\n<h2>Серии</h2>\n${list}` });
+  return page({ title, head, body: `<h1>${esc(title)}</h1>\n<p class="meta">Год: 2024 · Серий: ${c.episodes}</p>\n${factsBody(c)}\n${seasonsNav(c, season)}\n<h2>Серии</h2>\n${list}` });
 }
 
 export function renderEpisode(c, ep, season = 1) {
@@ -88,22 +91,29 @@ document.querySelectorAll('[data-embed]').forEach(b => b.addEventListener('click
   return page({ title, body });
 }
 
-/* alpha: the stream is a plain <video src>; the dub is in the URL. */
+/* alpha: the stream is a plain <video src>; the dub is in the URL. A case
+   with qualities offers the same episode as several files, one <source>
+   each, named by their height the way sites name them. */
 export function renderEmbedAlpha(c, ep, dubSlug) {
   const dub = c.dubs.alpha.find(d => slug(d) === dubSlug);
   if (!dub) return null;
-  return page({ title: `alpha · ${c.id} ${ep} ${dub}`, body:
-    `<video id="v" controls src="/media/native.mp4" data-dub="${esc(dub)}"></video>` });
+  const qs = c.layout.qualities;
+  const video = qs
+    ? `<video id="v" controls data-dub="${esc(dub)}">\n${qs.map(h => `<source src="/media/native-${h}.mp4" type="video/mp4">`).join('\n')}\n</video>`
+    : `<video id="v" controls src="/media/native.mp4" data-dub="${esc(dub)}"></video>`;
+  return page({ title: `alpha · ${c.id} ${ep} ${dub}`, body: video });
 }
 
 /* beta: the stream is in a script, the dubs are a select of its own. */
 export function renderEmbedBeta(c, ep) {
   const dubs = c.dubs.beta.map(d => ({ id: slug(d), name: d, file: '/media/hls/index.m3u8' }));
   const options = dubs.map((d, i) => `<option value="${d.id}"${i ? '' : ' selected'}>${esc(d.name)}</option>`).join('\n');
+  /* the subtitle tracks, one by default, more when the case names them; a thumbnails track is not subtitles */
+  const tracks = [...(c.layout.subs || ['Русские']).map((label, i) => ({ file: i ? '/media/lines-long.srt' : '/media/lines.srt', label, kind: 'captions' })), { file: '/media/thumbs.vtt', kind: 'thumbnails' }];
   return page({ title: `beta · ${c.id} ${ep}`, body: `<select id="dub">\n${options}\n</select>
 <video id="v" controls></video>
 <script>
-var player = { episode: ${ep}, file: "/media/hls/index.m3u8", dubs: ${JSON.stringify(dubs)}, tracks: [{ file: "/media/lines.srt", label: "Русские", kind: "captions" }, { file: "/media/thumbs.vtt", kind: "thumbnails" }] };
+var player = { episode: ${ep}, file: "/media/hls/index.m3u8", dubs: ${JSON.stringify(dubs)}, tracks: ${JSON.stringify(tracks)} };
 document.getElementById('dub').addEventListener('change', function () {
   player.file = player.dubs.find(function (d) { return d.id === this.value; }.bind(this)).file;
 });

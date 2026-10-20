@@ -12,6 +12,7 @@
    ═══════════════════════════════════════════════════════════ */
 
 import { seasonFromText as seasonOf } from '../discover/series.mjs';
+import { refuse } from '../reasons.mjs';
 
 const HOSTS = /(^|\.)(aniliberty\.top|anilibria\.top|anilibria\.tv)$/i;
 const RELEASE = /\/anime\/releases\/release\/([^/?#]+)/;
@@ -32,7 +33,7 @@ function marksOf(e) {
 
 async function json(session, url) {
   const res = await session.fetch(url, { headers: { accept: 'application/json' } });
-  if (res.status >= 400) throw new Error(`${url} answered ${res.status}`);
+  if (res.status >= 400) throw refuse('pageStatus', { status: res.status }, `${url} answered ${res.status}`);
   return JSON.parse(res.body);
 }
 
@@ -95,10 +96,12 @@ export default {
         marks: marksOf(e),
         dubs: [{
           name: STUDIO, lang: 'ru',
-          sources: [{
+          /* the site's own video when it has it; a release kept only on Rutube
+             names that player, so the refusal says which door is closed */
+          sources: QUALITIES.some(q => e[`hls_${q}`]) || !e.rutube_id ? [{
             player: 'aniliberty', embedUrl: `${site}/anime/video/episode/${e.id}`, extractor: 'site:aniliberty',
             streams: QUALITIES.filter(q => e[`hls_${q}`]).map(q => ({ kind: 'hls', url: e[`hls_${q}`], quality: `${q}p`, headers: { referer: `${site}/` } })),
-          }],
+          }] : [{ player: 'rutube.ru', embedUrl: `https://rutube.ru/play/embed/${e.rutube_id}`, streams: [] }],
         }],
       })).filter(e => Number.isFinite(e.number)),
     };

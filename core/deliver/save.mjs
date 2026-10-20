@@ -15,75 +15,17 @@ import fsp from 'node:fs/promises';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
+import { originReason, reasonOf } from '../reasons.mjs';
+import { segmentsOf, piecesOf, pickVariant } from './pieces.mjs';
+export { pickVariant };
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
 const run = (cmd, args, { signal } = {}) => new Promise((ok, bad) =>
-  execFile(cmd, args, { maxBuffer: 16 * 1024 * 1024, timeout: 30 * 60 * 1000, signal }, (e, out, err) => e ? bad(e.name === 'AbortError' ? e : new Error(String(err || e.message).slice(-600))) : ok(out)));
+  execFile(cmd, args, { maxBuffer: 16 * 1024 * 1024, timeout: 30 * 60 * 1000, signal }, (e, out, err) => e ? bad(e.name === 'AbortError' ? e : Object.assign(new Error(String(err || e.message).slice(-600)), { reason: { key: e.code === 'ENOENT' ? 'noFfmpeg' : 'ffmpeg' } })) : ok(out)));
 const stopped = () => Object.assign(new Error('stopped'), { name: 'AbortError' });
 
 export async function haveFfmpeg() { try { await run('ffmpeg', ['-version']); return true; } catch { return false; } }
-
-/* Segment addresses of a media playlist, absolute, in order, plus the
-   same playlist rewritten to the names the cache uses; a master
-   playlist is followed to its best variant first. */
-async function segmentsOf(delivery, entry, url, depth = 0) {
-  const res = await delivery.fetchOrigin(entry, url);
-  if (!res.ok) throw new Error(`origin answered ${res.status} for the playlist`);
-  const text = await res.text();
-  const base = res.url || url;
-  const lines = text.split(/\r?\n/);
-  if (lines.some(l => l.startsWith('#EXT-X-STREAM-INF'))) {
-    if (depth > 2) throw new Error('playlist points at playlists all the way down');
-    let best = null, bw = -1, group = null;
-    for (let i = 0; i < lines.length; i++) {
-      if (!lines[i].startsWith('#EXT-X-STREAM-INF')) continue;
-      const b = Number(/BANDWIDTH=(\d+)/.exec(lines[i])?.[1] || 0);
-      const next = lines.slice(i + 1).find(l => l.trim() && !l.startsWith('#'));
-      if (next && b > bw) { bw = b; best = new URL(next.trim(), base).toString(); group = /AUDIO="([^"]+)"/.exec(lines[i])?.[1] || null; }
-    }
-    if (!best) throw new Error('master playlist without variants');
-    entry.allowed.add(best);
-    const video = await segmentsOf(delivery, entry, best, depth + 1);
-    /* the sound is a rendition of its own: the one this stream names,
-       else the default, else the first of the variant's group */
-    if (group) {
-      const media = lines.filter(l => l.startsWith('#EXT-X-MEDIA') && /TYPE=AUDIO/.test(l) && (new RegExp(`GROUP-ID="${group.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`)).test(l));
-      const want = entry.stream.audio ? entry.stream.audio.index : media.findIndex(l => /DEFAULT=YES/.test(l));
-      const line = media[want >= 0 && want < media.length ? want : 0];
-      const uri = line && /URI="([^"]+)"/.exec(line)?.[1];
-      if (uri) {
-        const abs = new URL(uri, base).toString();
-        entry.allowed.add(abs);
-        video.audio = await segmentsOf(delivery, entry, abs, depth + 1);
-        /* the file will say which sound it holds */
-        video.audio.lang = /LANGUAGE="([^"]+)"/.exec(line)?.[1] || null;
-        video.audio.name = (entry.stream.audio && entry.stream.audio.name) || /NAME="([^"]+)"/.exec(line)?.[1] || null;
-      }
-    }
-    return video;
-  }
-  const segments = [], keys = [], out = [];
-  for (const line of lines) {
-    if (line.startsWith('#EXT-X-KEY') || line.startsWith('#EXT-X-MAP')) {
-      const u = /URI="([^"]+)"/.exec(line)?.[1];
-      if (u) {
-        const abs = new URL(u, base).toString();
-        entry.allowed.add(abs); keys.push(abs);
-        out.push(line.replace(/URI="[^"]+"/, `URI="${delivery.nameFor(abs)}"`));
-        continue;
-      }
-    }
-    if (line.trim() && !line.startsWith('#')) {
-      const abs = new URL(line.trim(), base).toString();
-      entry.allowed.add(abs); segments.push(abs);
-      out.push(delivery.nameFor(abs));
-      continue;
-    }
-    out.push(line);
-  }
-  return { segments, keys, localPlaylist: out.join('\n') };
-}
 
 /* the stream for a wanted quality, out of every stream of a dub's live sources */
 export function streamForQuality(streams, quality) {
@@ -97,9 +39,9 @@ export function createSaver({ delivery, cache, library, state = null }) {
   const jobs = new Map();
   const keyOf = ctx => `${ctx.series.id}/${ctx.episode.number}/${ctx.dub.key}`;
 
-  async function save(streamId, { series, episode, dub, source, stream, onProgress = () => {}, signal = null }) {
+  async function save(streamId, { series, episode, dub, source, stream, level = null, onProgress = () => {}, signal = null }) {
     const entry = delivery.get(streamId);
-    if (!entry) throw new Error('unknown stream');
+    if (!entry) throw Object.assign(new Error('unknown stream'), { reason: { key: 'noStream' } });
     const place = library.placeFor(series, episode, dub, 'mp4');
     await fsp.mkdir(place.dir, { recursive: true });
     const part = place.file + '.part';
@@ -114,22 +56,22 @@ export function createSaver({ delivery, cache, library, state = null }) {
       if (res && res.status === 416) { have = 0; res = null; }              // the half file is not what the origin has now
       if (res && res.status !== 206) { have = 0; res.body && res.body.cancel && res.body.cancel().catch(() => {}); res = null; }
       if (!res) res = await delivery.fetchOrigin(entry, stream.url, {}, opts);
-      if (!res.ok) throw new Error(`origin answered ${res.status}`);
+      if (!res.ok) throw Object.assign(new Error(`origin answered ${res.status}`), { reason: originReason(res.status) });
       const total = have + (Number(res.headers.get('content-length')) || 0);
       let done = have;
       onProgress({ phase: 'fetch', done, total, unit: 'bytes' });
       const counter = new Transform({ transform(chunk, _, cb) { done += chunk.length; onProgress({ phase: 'fetch', done, total, unit: 'bytes' }); cb(null, chunk); } });
       await pipeline(Readable.fromWeb(res.body), counter, fs.createWriteStream(part, { flags: have ? 'a' : 'w' }), signal ? { signal } : {});
     } else {
-      const { segments, keys, localPlaylist, audio } = await segmentsOf(delivery, entry, stream.url);
+      const { segments, keys, localPlaylist, audio } = await segmentsOf(delivery, entry, stream.url, 0, level);
       let done = 0;
-      const pieces = [...keys, ...segments, ...(audio ? [...audio.keys, ...audio.segments] : [])];
+      const pieces = piecesOf({ segments, keys, audio });
       const total = pieces.length;
       /* progress is in pieces; the ones already in the cache come back at once, so a save taken up runs to where it was */
       onProgress({ phase: 'fetch', done, total, unit: 'pieces' });
       for (const u of pieces) {
         if (signal && signal.aborted) throw stopped();
-        await delivery.piece(entry, u);
+        await delivery.piece(entry, u, 'save');
         onProgress({ phase: 'fetch', done: ++done, total, unit: 'pieces' });
       }
       const listFile = cache.fileFor(entry.id, 'local.m3u8');
@@ -160,6 +102,7 @@ export function createSaver({ delivery, cache, library, state = null }) {
       dub: dub.name, dubKey: dub.key,
       player: source.player, extractor: source.extractor, embedUrl: source.embedUrl,
       streamKind: stream.kind, streamUrl: stream.url,
+      quality: level ? `${level}p` : stream.quality || null,   // what the file holds, for the player to say when it plays it
     });
     await cache.drop(entry.id);
     return { file: place.file, sidecar: place.sidecar, size: st.size };
@@ -175,16 +118,19 @@ export function createSaver({ delivery, cache, library, state = null }) {
   const ctxOf = new Map();         // what each job saves, kept out of the job (the job is sent as JSON)
   const stops = new Map();         // the abort of each job working
   let held = false;                // the loading as a whole is on hold: the resume loop stops at the next record
-  const noteFor = (job, ctx, extra = {}) => state && state.setSave(job.key, { seriesUrl: ctx.series.sourceUrl, seriesId: ctx.series.id, episode: ctx.episode.number, dubKey: ctx.dub.key, quality: job.quality, phase: job.phase, done: job.done, total: job.total, unit: job.unit || null, error: job.error, paused: false, ...extra });
+  const noteFor = (job, ctx, extra = {}) => state && state.setSave(job.key, { seriesUrl: ctx.series.sourceUrl, seriesId: ctx.series.id, episode: ctx.episode.number, dubKey: ctx.dub.key, dubName: ctx.dub.name || null, quality: job.quality, phase: job.phase, done: job.done, total: job.total, unit: job.unit || null, error: job.error, paused: false, ...extra });
 
-  function start(streamId, ctx, { first = false } = {}) {
+  /* level: the height to take out of an adaptive stream; the job is then
+     named by it, so a pause and a resume keep to the same quality */
+  function start(streamId, ctx, { first = false, level = null } = {}) {
     const key = keyOf(ctx);
     const same = [...jobs.values()].find(j => j.key === key && (j.state === 'working' || j.state === 'queued'));
     if (same) { if (first) promote(same.id); return same; }
     const id = `${streamId}-${Date.now().toString(36)}`;
-    const job = { id, key, streamId, seriesId: ctx.series.id, episode: ctx.episode.number, dub: ctx.dub.key, quality: ctx.stream.quality || 'auto', state: 'queued', phase: 'fetch', done: 0, total: 0, unit: null, file: null, error: null, started: Date.now() };
+    level = Number(level) || null;
+    const job = { id, key, streamId, seriesId: ctx.series.id, episode: ctx.episode.number, dub: ctx.dub.key, dubName: ctx.dub.name || null, quality: level ? `${level}p` : ctx.stream.quality || 'auto', level, state: 'queued', phase: 'fetch', done: 0, total: 0, unit: null, file: null, error: null, started: Date.now() };
     jobs.set(id, job);
-    ctxOf.set(id, ctx);
+    ctxOf.set(id, { ...ctx, level });
     noteFor(job, ctx);
     if (first) return promote(id, job);
     line.push(id);
@@ -244,7 +190,7 @@ export function createSaver({ delivery, cache, library, state = null }) {
              so taking it up continues from there */
           job.state = 'paused';
           note({ paused: true });
-        } else { Object.assign(job, { state: 'error', error: e.message }); note(); }
+        } else { Object.assign(job, { state: 'error', error: reasonOf(e) }); note(); }   // a code, worded by the page
       })
       .finally(() => { stops.delete(job.id); if (job.state !== 'queued') ctxOf.delete(job.id); pump(); });
   }
@@ -308,6 +254,14 @@ export function createSaver({ delivery, cache, library, state = null }) {
     return n;
   }
 
+  /* every save there is, cancelled: the jobs in any state and every record left by earlier runs */
+  async function cancelAll() {
+    let n = 0;
+    for (const job of [...jobs.values()]) if (['queued', 'working', 'paused', 'error'].includes(job.state)) { await cancel(job.id); n++; }
+    if (state) for (const key of Object.keys(state.saves())) { state.clearSave(key); n++; }
+    return n;
+  }
+
   function pauseAll() {
     held = true;
     const out = [];
@@ -333,19 +287,23 @@ export function createSaver({ delivery, cache, library, state = null }) {
           const already = (await library.list()).some(s => s.episodes.some(e => e.seriesId === rec.seriesId && e.episode === rec.episode && e.dubKey === rec.dubKey));
           if (already) { state.clearSave(key); continue; }
           if (!lapka.series(rec.seriesId)) await lapka.look(rec.seriesUrl);
-          const r = await lapka.resolve({ seriesId: rec.seriesId, number: rec.episode, dubKey: rec.dubKey });
+          const r = await lapka.resolve({ seriesId: rec.seriesId, number: rec.episode, dubKey: rec.dubKey || null });
           const st = streamForQuality(r.streams || [], rec.quality);
           const ctx = st && lapka.context(st.id);
-          if (!ctx) { state.setSave(key, { error: 'no stream' }); continue; }
-          const job = start(st.id, ctx);
+          if (!ctx) { state.setSave(key, { error: { key: 'noStream' } }); continue; }
+          /* a quality named on an adaptive stream is one of its levels */
+          const level = st && !st.quality && /^\d{3,4}p$/.test(String(rec.quality || '')) ? parseInt(rec.quality, 10) : null;
+          const job = start(st.id, ctx, { level });
+          /* a record written before its dub was known is named anew by the job: the old name goes */
+          if (job.key !== key) state.clearSave(key);
           await new Promise(res => { const t = setInterval(() => { if (job.state !== 'working' && job.state !== 'queued') { clearInterval(t); res(); } }, 500); });
           out.push({ key, state: job.state, error: job.error });
-        } catch (e) { state.setSave(key, { error: e.message }); out.push({ key, state: 'error', error: e.message }); }
+        } catch (e) { const why = reasonOf(e); state.setSave(key, { error: why }); out.push({ key, state: 'error', error: why }); }
       }
       return out;
     })().finally(() => { resuming = null; });
     return resuming;
   }
 
-  return { save, start, promote, pause, pauseAll, cancel, cancelFor, resume, job: id => jobs.get(id) || null, jobs, keyOf };
+  return { save, start, promote, pause, pauseAll, cancel, cancelFor, cancelAll, resume, job: id => jobs.get(id) || null, jobs, keyOf };
 }
