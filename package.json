@@ -1,6 +1,6 @@
 {
   "name": "@mythhand/lapka",
-  "version": "1.5.0",
+  "version": "1.4.1",
   "description": "Lapka: a local player. Paste a link, it finds the episodes and the dubs, plays them and saves them to your folder.",
   "bin": {
     "lapka": "core/main.mjs"

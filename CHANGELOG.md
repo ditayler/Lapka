@@ -3,7 +3,7 @@
 The releases of Lapka, newest first. The "Check for an update" button in the
 settings looks at the same releases on GitHub.
 
-## 1.5.0 — 20 October 2026
+## 1.4.1 — 21 October 2026
 
 
 ### Bug Fixes
